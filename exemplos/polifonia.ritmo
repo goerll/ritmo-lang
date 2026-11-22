@@ -1,0 +1,15 @@
+// polifonia.ritmo — acordes com ',' e progressão com '< >'
+tempo 90;
+
+instrumento pad   { onda triangulo; volume 0.4; }
+instrumento sino  { onda senoide;   volume 0.6; }
+
+// progressão C – Am – F – G (um acorde por ciclo)
+padrao acordes = [<c4 a3 f3 g3>, <e4 c4 a3 b3>, <g4 e4 c4 d4>];
+
+faixa harmonia: nota acordes com pad;
+faixa arpejo:   nota [[<c5 a4 f4 g4> <e5 c5 a4 b4> <g5 e5 c5 d5> ~]*2] com sino .reverso();
+faixa baixo:    nota [<c2 a1 f1 g1> <c2 a1 f1 g1> ~ ~];   // sem 'com': instrumento padrão (aviso)
+faixa ritmo:    bateria [bd ~ ~ bd, ~ cp];
+
+tocar 8 ciclos salvar "polifonia.wav";

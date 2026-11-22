@@ -1,0 +1,14 @@
+// bateria.ritmo — só percussão: subgrupos, *n, /n, alternância e polifonia
+tempo 100;
+
+padrao bumbo  = [bd ~ ~ bd ~ ~ bd ~, ~ ~ ~ <~ bd>];   // tresillo + bumbo extra a cada 2 ciclos
+padrao caixa  = [~ sd ~ [sd cp]];
+padrao chimbal = [hh*2 hh*2 [hh oh] hh*2];
+
+faixa kick:  bateria bumbo;
+faixa snare: bateria caixa .volume(0.8);
+faixa hats:  bateria chimbal .volume(0.5);
+faixa palma: bateria [cp cp cp ~] .lento(4) .volume(0.6);
+faixa perc:  bateria [oh oh ~ oh oh ~ oh ~] .volume(0.3);
+
+tocar 8 ciclos salvar "bateria.wav";

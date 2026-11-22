@@ -1,0 +1,93 @@
+// =====================================================================
+//  gramatica.lark — Gramática formal da DSL musical "ritmo"
+//  (estilo Strudel/TidalCycles)  —  AV3 de Compiladores, IFC Blumenau
+//
+//  Parser: Lark, algoritmo LALR(1) com lexer contextual.
+//  Convenções do Lark:
+//    regra: ...        não terminal (minúsculas)
+//    TERMINAL: ...     terminal / token (maiúsculas)
+//    "x"               terminal literal anônimo (palavra reservada ou delimitador)
+//    [ x ]             opcional (gera None quando ausente)
+//    x* / x+ / x?      repetição zero-ou-mais / um-ou-mais / opcional
+//    -> nome           apelido do nó gerado na árvore
+//    TERMINAL.n        prioridade léxica n (maior vence)
+// =====================================================================
+
+// ---------------------------------------------------------------------
+//  1. Estrutura do programa
+// ---------------------------------------------------------------------
+
+programa        : declaracao*
+
+?declaracao     : cfg_tempo
+                | def_instrumento
+                | def_padrao
+                | faixa
+                | tocar
+
+cfg_tempo       : "tempo" NUMERO ";"
+
+def_instrumento : "instrumento" ID "{" (propriedade ";")* "}"
+propriedade     : "onda" ONDA           -> prop_onda
+                | VOLUME NUMERO         -> prop_volume
+
+def_padrao      : "padrao" ID "=" padrao ";"
+
+faixa           : "faixa" ID ":" fonte transformacao* ";"
+fonte           : tipo_fonte (padrao | ID) ["com" ID]
+tipo_fonte      : NOTA_KW | BATERIA_KW
+
+transformacao   : "." nome_transf "(" [NUMERO] ")"
+nome_transf     : ID | VOLUME           // "volume" é reservada, mas também nome de transformação
+
+tocar           : "tocar" NUMERO "ciclos" ["salvar" STRING] ";"
+
+// ---------------------------------------------------------------------
+//  2. Mini-notação — da MENOR para a MAIOR precedência
+//
+//     camadas (",")  <  sequência (justaposição)  <  pós-fixos (* /)
+//
+//  Ex.: [bd sd*2, hh]  ≡  [ ( bd (sd*2) ) , ( hh ) ]
+// ---------------------------------------------------------------------
+
+padrao          : "[" camadas "]"
+
+camadas         : sequencia ("," sequencia)*        // polifonia: liga mais fraco
+sequencia       : passo+                            // justaposição: divide o ciclo
+passo           : atomo modificador*                // pós-fixos: ligam mais forte
+
+?modificador    : "*" NUMERO            -> mod_rapido
+                | "/" NUMERO            -> mod_lento
+
+?atomo          : NOTA                  -> nota
+                | SOM                   -> som
+                | "~"                   -> pausa
+                | "[" camadas "]"       -> grupo
+                | "<" sequencia ">"     -> alterna
+
+// ---------------------------------------------------------------------
+//  3. Léxico
+//
+//  Conflitos resolvidos por prioridade (.3 > padrão 0) e por "lookahead
+//  negativo" (?!...), que impede casar só o prefixo de um identificador
+//  maior (ex.: "c4x" NÃO vira NOTA "c4" + "x").
+//  Palavras reservadas (strings literais) têm prioridade sobre ID.
+// ---------------------------------------------------------------------
+
+NOTA.3          : /[a-g](#|b)?[0-9](?![A-Za-z0-9_#])/      // c4, f#3, eb2, b3, bb3
+SOM.3           : /(bd|sd|hh|oh|cp)(?![A-Za-z0-9_])/       // bateria sintetizada
+ONDA.3          : /(senoide|quadrada|serra|triangulo)(?![A-Za-z0-9_])/
+
+NOTA_KW         : "nota"
+BATERIA_KW      : "bateria"
+VOLUME          : "volume"
+
+NUMERO          : /-?[0-9]+(\.[0-9]+)?/
+STRING          : /"[^"\n]*"/
+ID              : /[a-zA-Z_][a-zA-Z0-9_]*/
+
+COMENTARIO      : /\/\/[^\n]*/
+
+%import common.WS
+%ignore WS
+%ignore COMENTARIO

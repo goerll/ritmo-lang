@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.wav
+out.py
+
+# transcrições de músicas comerciais: uso pessoal, não publicar
+covers/
+.DS_Store

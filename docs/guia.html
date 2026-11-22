@@ -1,0 +1,1662 @@
+<title>Compilador ritmo por dentro</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,750&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: guia longo de estudo — índice fixo à esquerda (desktop), coluna de leitura ~70ch,
+   blocos de código e diagramas podem ser mais largos com rolagem própria. */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --ink: #17202a;
+  --muted: #586473;
+  --line: #dce1e7;
+  --accent: #c2410c;      /* laranja "batida" */
+  --accent-soft: #fbe6da;
+  --accent2: #0f766e;     /* verde-azulado "nota" */
+  --accent2-soft: #d8f0ec;
+  --code-bg: #eef1f5;
+  --code-ink: #1d2733;
+  --hl-kw: #9a3412;
+  --hl-str: #0f766e;
+  --hl-num: #7c3aed;
+  --hl-com: #7b8794;
+  --hl-fn: #1d4ed8;
+  --warn: #b45309;
+  --err: #b91c1c;
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1319; --surface: #151c24; --ink: #e5eaf0; --muted: #9aa6b4; --line: #26313c;
+    --accent: #fb923c; --accent-soft: #3a2418; --accent2: #2dd4bf; --accent2-soft: #12302d;
+    --code-bg: #1a222c; --code-ink: #dde4ec;
+    --hl-kw: #fdba74; --hl-str: #5eead4; --hl-num: #c4b5fd; --hl-com: #7d8a99; --hl-fn: #93c5fd;
+    --warn: #fbbf24; --err: #f87171;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1319; --surface: #151c24; --ink: #e5eaf0; --muted: #9aa6b4; --line: #26313c;
+  --accent: #fb923c; --accent-soft: #3a2418; --accent2: #2dd4bf; --accent2-soft: #12302d;
+  --code-bg: #1a222c; --code-ink: #dde4ec;
+  --hl-kw: #fdba74; --hl-str: #5eead4; --hl-num: #c4b5fd; --hl-com: #7d8a99; --hl-fn: #93c5fd;
+  --warn: #fbbf24; --err: #f87171;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16.5px; line-height: 1.65;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+a { color: var(--accent2); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+.shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 1fr; gap: 40px; }
+@media (min-width: 1040px) { .shell { grid-template-columns: 250px minmax(0, 1fr); } }
+
+/* índice */
+.toc { font-size: 14px; }
+.toc-inner { padding-block: 28px 12px; }
+@media (min-width: 1040px) {
+  .toc-inner { position: sticky; top: env(safe-area-inset-top, 0px); max-height: 100vh; overflow-y: auto; padding-top: 40px; }
+}
+.toc .brand { font-family: var(--font-display); font-weight: 750; font-size: 18px; letter-spacing: -0.01em; }
+.toc .brand span { color: var(--accent); }
+.toc ol { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 2px; counter-reset: toc; }
+.toc li a {
+  display: grid; grid-template-columns: 26px 1fr; padding: 5px 8px; border-radius: 6px;
+  color: var(--muted); text-decoration: none;
+}
+.toc li a:hover { background: var(--surface); color: var(--ink); }
+.toc li a .n { font-family: var(--font-mono); font-size: 12px; color: var(--accent); padding-top: 2px; }
+.toc details summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
+@media (min-width: 1040px) { .toc details > summary { display: none; } }
+
+main { min-width: 0; padding-top: 28px; }
+@media (min-width: 1040px) { main { padding-top: 40px; } }
+.prose { max-width: 72ch; }
+
+/* tipografia */
+h1, h2, h3, h4 { font-family: var(--font-display); text-wrap: balance; line-height: 1.15; letter-spacing: -0.015em; }
+h1 { font-size: clamp(34px, 6vw, 54px); font-weight: 750; margin: 6px 0 16px; }
+h2 { font-size: clamp(26px, 3.6vw, 34px); font-weight: 750; margin: 0 0 14px; }
+h3 { font-size: 21px; font-weight: 600; margin: 34px 0 8px; }
+h4 { font-size: 17px; font-weight: 600; margin: 24px 0 6px; }
+p { margin: 0 0 14px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.lede { font-size: 19px; color: var(--muted); max-width: 62ch; }
+section.cap { padding-top: 56px; margin-top: 8px; border-top: 1px solid var(--line); }
+section.cap:first-of-type { border-top: 0; padding-top: 0; }
+.cap-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.cap-head .num { font-family: var(--font-mono); font-size: 14px; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 10px; }
+.cap-head .file { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+ul, ol { padding-left: 22px; margin: 0 0 14px; }
+li { margin-bottom: 4px; }
+strong { font-weight: 600; }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); color: var(--code-ink); padding: 1px 5px; border-radius: 4px; }
+kbd { font-family: var(--font-mono); font-size: 0.85em; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
+
+pre {
+  background: var(--code-bg); color: var(--code-ink); border-radius: 10px; padding: 14px 16px;
+  overflow-x: auto; font-family: var(--font-mono); font-size: 13.5px; line-height: 1.55; margin: 0 0 18px;
+  border: 1px solid var(--line);
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+.code-label { font-family: var(--font-mono); font-size: 12px; color: var(--muted); margin: 0 0 4px; display: flex; justify-content: space-between; gap: 8px; }
+.hl-kw { color: var(--hl-kw); font-weight: 600; }
+.hl-str { color: var(--hl-str); }
+.hl-num { color: var(--hl-num); }
+.hl-com { color: var(--hl-com); font-style: italic; }
+.hl-fn { color: var(--hl-fn); }
+
+/* caixas */
+.note, .key {
+  border-radius: 10px; padding: 14px 16px; margin: 0 0 18px; border: 1px solid var(--line); background: var(--surface);
+}
+.key { border-left: 4px solid var(--accent); }
+.key .k-title, .note .k-title { font-weight: 600; font-family: var(--font-display); margin-bottom: 4px; display: block; }
+.note { border-left: 4px solid var(--accent2); }
+.say {
+  border-radius: 10px; padding: 14px 16px; margin: 0 0 18px; background: var(--accent2-soft); color: var(--ink);
+}
+.say .k-title { display: block; font-family: var(--font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent2); margin-bottom: 4px; }
+
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+.tbl { overflow-x: auto; margin: 0 0 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; font-size: 13px; color: var(--muted); background: var(--bg); }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+
+/* pipeline */
+.pipeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 18px 0 22px; }
+.stage { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; position: relative; min-width: 0; }
+.stage .s-n { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+.stage .s-t { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 2px 0 4px; }
+.stage .s-io { font-size: 13px; color: var(--muted); line-height: 1.45; }
+.stage .s-f { font-family: var(--font-mono); font-size: 12px; color: var(--accent2); margin-top: 6px; word-break: break-all; }
+
+/* árvore */
+.tree { white-space: pre; }
+
+/* Q&A */
+details.qa { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); margin-bottom: 8px; }
+details.qa summary { cursor: pointer; padding: 12px 16px; font-weight: 600; list-style: none; display: grid; grid-template-columns: 22px 1fr; gap: 6px; }
+details.qa summary::-webkit-details-marker { display: none; }
+details.qa summary::before { content: "+"; font-family: var(--font-mono); color: var(--accent); }
+details.qa[open] summary::before { content: "−"; }
+details.qa .ans { padding: 0 16px 14px 44px; }
+details.qa .ans > :last-child { margin-bottom: 0; }
+
+/* laboratório */
+.lab { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin: 18px 0 24px; }
+.lab-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.lab label { font-size: 13px; color: var(--muted); }
+.lab input[type=text] {
+  flex: 1 1 320px; min-width: 0; font-family: var(--font-mono); font-size: 15px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink);
+}
+.lab select, .lab input[type=number] {
+  font-family: var(--font-body); font-size: 14px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink);
+}
+.lab input[type=number] { width: 80px; }
+.btn {
+  font-family: var(--font-body); font-size: 14px; font-weight: 600; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--surface);
+}
+.btn.ghost { background: transparent; color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.chip {
+  font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--muted);
+  border-radius: 999px; padding: 3px 10px; cursor: pointer;
+}
+.chip:hover { color: var(--ink); border-color: var(--accent); }
+.lab-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 14px; }
+@media (min-width: 760px) { .lab-grid { grid-template-columns: 1fr 1fr; } }
+.panel { min-width: 0; }
+.panel h4 { margin: 0 0 6px; font-size: 14px; font-family: var(--font-mono); font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.panel pre { margin: 0; max-height: 300px; overflow: auto; font-size: 12.5px; }
+.toks { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px; background: var(--code-bg); border-radius: 10px; border: 1px solid var(--line); max-height: 300px; overflow: auto; }
+.tok { font-family: var(--font-mono); font-size: 12px; border-radius: 6px; padding: 2px 6px; background: var(--surface); border: 1px solid var(--line); display: inline-flex; gap: 6px; }
+.tok b { color: var(--accent); font-weight: 600; }
+.lab-err { font-family: var(--font-mono); font-size: 13px; color: var(--err); white-space: pre; overflow-x: auto; margin: 10px 0 0; }
+.timeline-wrap { overflow-x: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.timeline-wrap svg { display: block; width: 100%; min-width: 560px; height: auto; }
+.lab-foot { font-size: 13px; color: var(--muted); margin-top: 8px; }
+
+.ex-list { display: grid; gap: 10px; }
+.ex { border: 1px dashed var(--line); border-radius: 10px; padding: 12px 14px; background: var(--surface); }
+
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+hr.sep { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
+.small { font-size: 14px; color: var(--muted); }
+</style>
+
+<div class="shell">
+  <nav class="toc" aria-label="Índice">
+    <div class="toc-inner">
+      <div class="brand">compilador <span>.ritmo</span></div>
+      <details open>
+        <summary>Índice</summary>
+        <ol>
+          <li><a href="#visao"><span class="n">00</span><span>Visão geral</span></a></li>
+          <li><a href="#linguagem"><span class="n">01</span><span>A linguagem</span></a></li>
+          <li><a href="#lab"><span class="n">02</span><span>Laboratório interativo</span></a></li>
+          <li><a href="#arquitetura"><span class="n">03</span><span>Arquitetura e arquivos</span></a></li>
+          <li><a href="#lexico"><span class="n">04</span><span>Fase 1 · Análise léxica</span></a></li>
+          <li><a href="#sintatico"><span class="n">05</span><span>Fase 2 · Análise sintática</span></a></li>
+          <li><a href="#ast"><span class="n">06</span><span>Fase 3 · A AST</span></a></li>
+          <li><a href="#semantico"><span class="n">07</span><span>Fase 4 · Análise semântica</span></a></li>
+          <li><a href="#gerador"><span class="n">08</span><span>Fase 5 · Geração de código</span></a></li>
+          <li><a href="#runtime"><span class="n">09</span><span>Runtime · modelo de padrões</span></a></li>
+          <li><a href="#sintese"><span class="n">10</span><span>Runtime · síntese de áudio</span></a></li>
+          <li><a href="#cli"><span class="n">11</span><span>CLI e testes</span></a></li>
+          <li><a href="#decisoes"><span class="n">12</span><span>Decisões e limitações</span></a></li>
+          <li><a href="#perguntas"><span class="n">13</span><span>Perguntas do professor</span></a></li>
+          <li><a href="#exercicios"><span class="n">14</span><span>Exercícios</span></a></li>
+          <li><a href="#glossario"><span class="n">15</span><span>Glossário</span></a></li>
+        </ol>
+      </details>
+    </div>
+  </nav>
+
+  <main>
+  <!-- ===================================================== 00 -->
+  <section class="cap" id="visao">
+    <div class="prose">
+      <div class="eyebrow">AV3 · Compiladores · IFC Blumenau</div>
+      <h1>O compilador <code style="font-size:0.8em">.ritmo</code> por dentro</h1>
+      <p class="lede">Este guia percorre o compilador inteiro, na ordem em que o código-fonte passa por ele. Para cada fase, explica o que ela faz, por que foi feita assim e qual trecho do código responde por ela. O objetivo é você conseguir defender cada decisão como se tivesse escrito tudo à mão.</p>
+
+      <h3>A ideia em uma frase</h3>
+      <p>O programa lê um arquivo <code>.ritmo</code>, que descreve música em <strong>ciclos</strong> e <strong>padrões</strong> no estilo do TidalCycles e do Strudel. Ele verifica se o programa está correto e o traduz para um script Python que chama funções de uma pequena biblioteca de padrões e síntese de áudio. Em seguida, <strong>executa</strong> esse script na hora, que gera o <code>.wav</code> e toca o som.</p>
+    </div>
+
+    <div class="pipeline" role="list" aria-label="Fases do compilador">
+      <div class="stage" role="listitem"><div class="s-n">entrada</div><div class="s-t">Texto-fonte</div><div class="s-io">string com o programa <code>.ritmo</code></div><div class="s-f">exemplos/demo.ritmo</div></div>
+      <div class="stage" role="listitem"><div class="s-n">fase 1 + 2</div><div class="s-t">Léxico e sintaxe</div><div class="s-io">texto → tokens → árvore de derivação (Lark, LALR(1))</div><div class="s-f">gramatica.lark · parser.py</div></div>
+      <div class="stage" role="listitem"><div class="s-n">fase 3</div><div class="s-t">AST</div><div class="s-io">árvore concreta → objetos Python com posição</div><div class="s-f">parser.py · ast_nos.py</div></div>
+      <div class="stage" role="listitem"><div class="s-n">fase 4</div><div class="s-t">Semântica</div><div class="s-io">tabela de símbolos, tipos e valores; erros e avisos</div><div class="s-f">semantico.py</div></div>
+      <div class="stage" role="listitem"><div class="s-n">fase 5</div><div class="s-t">Geração</div><div class="s-io">AST → código Python com runtime embutido</div><div class="s-f">gerador.py</div></div>
+      <div class="stage" role="listitem"><div class="s-n">execução</div><div class="s-t">Runtime</div><div class="s-io"><code>exec</code> → padrões → eventos → áudio</div><div class="s-f">runtime/padroes.py · sintese.py</div></div>
+    </div>
+
+    <div class="prose">
+      <div class="key"><span class="k-title">Por que isso é um compilador, e não só um interpretador</span>
+      O programa nunca "toca" a árvore diretamente. Ele <strong>traduz</strong> para outra linguagem (Python) e depois executa a tradução. Esse é o modelo de um <em>transpilador</em> (compilador fonte-para-fonte). O requisito de <em>one-step pipeline</em> é cumprido porque a tradução e a execução acontecem no mesmo comando: o usuário nunca vê o Python, a menos que peça com <code>--emitir</code>.</div>
+
+      <h3>Como rodar</h3>
+<pre><code data-lang="sh">cd ~/dsl-musical
+.venv/bin/python main.py exemplos/demo.ritmo                  # compila, gera o .wav e toca
+.venv/bin/python main.py exemplos/demo.ritmo --mostrar-ast    # imprime a AST e para
+.venv/bin/python main.py exemplos/demo.ritmo --mostrar-arvore # árvore de derivação do Lark
+.venv/bin/python main.py exemplos/demo.ritmo --emitir out.py  # salva o Python gerado
+.venv/bin/python main.py exemplos/demo.ritmo --sem-tocar      # só gera o .wav
+.venv/bin/python -m pytest testes                             # 71 testes</code></pre>
+      <p class="small">Sugestão de leitura: faça um passe rápido pelas seções 01 a 03, brinque no laboratório e depois leia as fases com o código aberto ao lado. A seção 13 reúne as perguntas mais prováveis da banca.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================== 01 -->
+  <section class="cap" id="linguagem">
+    <div class="prose">
+      <div class="cap-head"><span class="num">01</span><h2>A linguagem</h2></div>
+      <p>Antes do compilador, a linguagem que ele aceita. Tudo gira em torno de um conceito: o <strong>ciclo</strong>.</p>
+
+      <h3>Ciclos</h3>
+      <p>Um ciclo é um compasso de 4 tempos. Com <code>tempo 120;</code> (BPM), cada tempo dura 0,5 s e cada ciclo dura <code>240 / bpm</code> = 2 s. <strong>Todo o tempo interno do compilador é medido em ciclos</strong>, não em segundos. Os segundos só aparecem no último passo, a síntese de áudio.</p>
+      <p>Um <strong>padrão</strong> descreve o que acontece dentro de um ciclo e se repete a cada ciclo. Dentro dele, o tempo é <strong>dividido igualmente</strong> entre os elementos: <code>[bd sd hh hh]</code> tem 4 passos, cada um ocupando ¼ do ciclo.</p>
+
+      <h3>Um programa completo</h3>
+<pre><code data-lang="ritmo">// demo.ritmo
+tempo 120;                                   // configuração (BPM)
+
+instrumento lead  { onda quadrada; volume 0.5; }   // declaração de instrumento
+instrumento grave { onda serra;    volume 0.7; }
+
+padrao groove = [bd ~ sd ~, hh*8];           // padrão nomeado (reutilizável)
+
+faixa percussao: bateria groove;             // faixa de bateria, usando o padrão
+faixa baixo:   nota [c2 ~ c2 &lt;eb2 g2&gt;] com grave .lento(2);
+faixa melodia: nota [c4 e4 [g4 a4] &lt;b4 c5&gt;] com lead .transpor(12) .volume(0.6);
+
+tocar 8 ciclos salvar "demo.wav";             // comando final</code></pre>
+
+      <h3>Os cinco tipos de declaração</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Declaração</th><th>Forma</th><th>Para que serve</th></tr></thead>
+        <tbody>
+          <tr><td>tempo</td><td><code>tempo 120;</code></td><td>BPM. Opcional, com 120 como padrão (gera aviso).</td></tr>
+          <tr><td>instrumento</td><td><code>instrumento x { onda serra; volume 0.7; }</code></td><td>Timbre das faixas de nota: forma de onda e volume.</td></tr>
+          <tr><td>padrao</td><td><code>padrao p = [ ... ];</code></td><td>Dá nome a um padrão para reutilizar em faixas.</td></tr>
+          <tr><td>faixa</td><td><code>faixa x: nota|bateria (padrão|nome) [com instr] .transf()...;</code></td><td>Uma voz que toca em paralelo com as outras.</td></tr>
+          <tr><td>tocar</td><td><code>tocar 8 ciclos [salvar "a.wav"];</code></td><td>Quantos ciclos renderizar e onde salvar. Exatamente um.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Mini-notação: o coração da linguagem</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Sintaxe</th><th>Nome</th><th>Significado</th></tr></thead>
+        <tbody>
+          <tr><td><code>c4</code> <code>f#3</code> <code>eb2</code></td><td>nota</td><td>Letra + acidente opcional (<code>#</code> sustenido, <code>b</code> bemol) + oitava. <code>c4</code> é o dó central (MIDI 60).</td></tr>
+          <tr><td><code>bd sd hh oh cp</code></td><td>som de bateria</td><td>Bumbo, caixa, chimbal fechado, chimbal aberto, palma. Todos sintetizados.</td></tr>
+          <tr><td><code>~</code></td><td>pausa</td><td>Ocupa um passo sem tocar nada.</td></tr>
+          <tr><td><code>a b c</code></td><td>sequência</td><td>Divide o espaço de tempo igualmente (cada um com ⅓).</td></tr>
+          <tr><td><code>[a b]</code></td><td>subgrupo</td><td>Vale como um único passo, subdividido por dentro.</td></tr>
+          <tr><td><code>a, b</code></td><td>camadas (polifonia)</td><td>Toca as duas sequências ao mesmo tempo.</td></tr>
+          <tr><td><code>&lt;a b&gt;</code></td><td>alternância</td><td>Um elemento por ciclo: a no ciclo 0, b no 1, a no 2…</td></tr>
+          <tr><td><code>x*n</code></td><td>rápido</td><td>Comprime: toca x <em>n</em> vezes no espaço de um passo.</td></tr>
+          <tr><td><code>x/n</code></td><td>lento</td><td>Expande: x leva <em>n</em> vezes mais tempo.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Transformações de faixa</h3>
+      <p>Vêm depois da fonte, com ponto, e são aplicadas <strong>na ordem, da esquerda para a direita</strong>: <code>.rapido(n)</code>, <code>.lento(n)</code>, <code>.reverso()</code>, <code>.transpor(semitons)</code> e <code>.volume(x)</code>.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================== 02 -->
+  <section class="cap" id="lab">
+    <div class="prose">
+      <div class="cap-head"><span class="num">02</span><h2>Laboratório interativo</h2></div>
+      <p>Digite uma mini-notação (sempre começando com <code>[</code>) e veja o mesmo caminho que o compilador faz: <strong>tokens</strong> (fase 1), <strong>AST</strong> (fases 2 e 3), <strong>verificações</strong> (fase 4), <strong>código Python</strong> (fase 5) e, por fim, os <strong>eventos</strong> que o runtime produz, desenhados no tempo. Dá para ouvir também.</p>
+      <p class="small">O laboratório é uma reimplementação em JavaScript, só para estudo, do parser da mini-notação, do gerador e do runtime de padrões. Ele segue as mesmas regras do compilador em Python: mesma gramática, mesmas mensagens e mesmas fórmulas de tempo com frações exatas. A síntese de áudio é uma versão simplificada com Web Audio.</p>
+    </div>
+
+    <div class="lab" id="labbox">
+      <div class="lab-row">
+        <label for="lab-in" class="sr">Padrão</label>
+        <input id="lab-in" type="text" value="[bd sd*2, hh]" spellcheck="false" autocomplete="off" aria-label="Padrão em mini-notação">
+      </div>
+      <div class="chips" id="lab-presets" aria-label="Exemplos"></div>
+      <div class="lab-row" style="margin-top:10px">
+        <label for="lab-ciclos">ciclos</label>
+        <select id="lab-ciclos"><option>1</option><option selected>2</option><option>4</option><option>8</option></select>
+        <label for="lab-trans">transformação</label>
+        <select id="lab-trans">
+          <option value="">nenhuma</option>
+          <option value="reverso">.reverso()</option>
+          <option value="lento2">.lento(2)</option>
+          <option value="rapido2">.rapido(2)</option>
+          <option value="transpor12">.transpor(12)</option>
+        </select>
+        <label for="lab-onda">onda</label>
+        <select id="lab-onda"><option value="sine">senoide</option><option value="square">quadrada</option><option value="sawtooth">serra</option><option value="triangle" selected>triangulo</option></select>
+        <label for="lab-bpm">bpm</label>
+        <input id="lab-bpm" type="number" value="120" min="30" max="300">
+        <button class="btn" id="lab-play" type="button">▶ Tocar</button>
+        <button class="btn ghost" id="lab-stop" type="button">■ Parar</button>
+      </div>
+      <div id="lab-err" class="lab-err" hidden></div>
+
+      <div class="timeline-wrap"><svg id="lab-svg" viewBox="0 0 1000 120" role="img" aria-label="Linha do tempo dos eventos"></svg></div>
+      <div class="lab-foot" id="lab-sum"></div>
+
+      <div class="lab-grid">
+        <div class="panel"><h4>1 · Tokens</h4><div class="toks" id="lab-toks"></div></div>
+        <div class="panel"><h4>2 · AST</h4><pre class="tree" id="lab-ast"></pre></div>
+        <div class="panel"><h4>3 · Python gerado</h4><pre id="lab-py"></pre></div>
+        <div class="panel"><h4>4 · Eventos (início, fim, valor) em ciclos</h4><pre id="lab-evs"></pre></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================== 03 -->
+  <section class="cap" id="arquitetura">
+    <div class="prose">
+      <div class="cap-head"><span class="num">03</span><h2>Arquitetura e arquivos</h2></div>
+      <p>Cada fase do compilador é um módulo separado e conversa com a próxima por uma estrutura de dados bem definida. Essa separação é o que você deve enfatizar: <strong>cada fase só conhece a saída da fase anterior</strong>.</p>
+    </div>
+
+    <div class="tbl"><table>
+      <thead><tr><th>Arquivo</th><th>Fase</th><th>Recebe</th><th>Devolve</th></tr></thead>
+      <tbody>
+        <tr><td><code>gramatica.lark</code></td><td>especificação</td><td>—</td><td>gramática formal (terminais e regras)</td></tr>
+        <tr><td><code>compilador/parser.py</code></td><td>1, 2, 3</td><td><code>str</code> (fonte)</td><td><code>Programa</code> (AST)</td></tr>
+        <tr><td><code>compilador/ast_nos.py</code></td><td>3</td><td>—</td><td>dataclasses dos nós e <code>formatar_arvore</code></td></tr>
+        <tr><td><code>compilador/semantico.py</code></td><td>4</td><td><code>Programa</code></td><td><code>Resultado(tabela, avisos)</code> ou <code>ErrosSemanticos</code></td></tr>
+        <tr><td><code>compilador/gerador.py</code></td><td>5</td><td><code>Programa</code> + <code>TabelaSimbolos</code></td><td><code>str</code> (código Python)</td></tr>
+        <tr><td><code>compilador/erros.py</code></td><td>todas</td><td>—</td><td>exceções com linha, coluna e trecho</td></tr>
+        <tr><td><code>runtime/padroes.py</code></td><td>execução</td><td>—</td><td>combinadores de padrões (embutidos no script)</td></tr>
+        <tr><td><code>runtime/sintese.py</code></td><td>execução</td><td>faixas</td><td>amostras de áudio, <code>.wav</code>, reprodução</td></tr>
+        <tr><td><code>main.py</code></td><td>CLI</td><td>argumentos</td><td>orquestra tudo e faz o <code>exec</code></td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="prose">
+      <h3>O fluxo em código</h3>
+      <p>A função <code>compilar</code> em <code>main.py</code> é o resumo do projeto inteiro:</p>
+<pre><code data-lang="py">def compilar(fonte: str, nome: str, *, reproduzir=True, arquivo_padrao="saida.wav"):
+    """Fonte -&gt; (AST, resultado semântico, código Python). Lança erros de compilação."""
+    prog = analisar(fonte)                       # léxico + sintático -&gt; AST
+    resultado = analisar_semantica(prog)         # semântico
+    codigo = gerar(prog, resultado.tabela, nome_fonte=nome,
+                   reproduzir=reproduzir, arquivo_padrao=arquivo_padrao)
+    return prog, resultado, codigo
+
+
+def executar(codigo: str, nome: str):
+    escopo = {"__name__": "__main__", "__file__": nome}
+    exec(compile(codigo, f"&lt;gerado de {nome}&gt;", "exec"), escopo)</code></pre>
+      <p>Se qualquer fase falha, ela lança uma exceção (<code>ErroLexico</code>, <code>ErroSintatico</code> ou <code>ErrosSemanticos</code>). O <code>main</code> a captura, imprime a mensagem formatada e retorna código de saída 1. Nada é gerado nem executado.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================== 04 -->
+  <section class="cap" id="lexico">
+    <div class="prose">
+      <div class="cap-head"><span class="num">04</span><h2>Fase 1 · Análise léxica</h2><span class="file">gramatica.lark (terminais) · parser.py</span></div>
+      <p>O analisador léxico (<em>lexer</em>, <em>scanner</em>) transforma a sequência de caracteres numa sequência de <strong>tokens</strong>. Cada token tem um <strong>tipo</strong> (NOTA, NUMERO, ID…) e um <strong>lexema</strong> (o texto exato, como <code>c4</code> ou <code>120</code>). Espaços e comentários são descartados aqui.</p>
+
+      <h3>Exemplo real</h3>
+      <p>A linha <code>faixa baixo: nota [c2 ~ &lt;eb2 g2&gt;] com grave .lento(2);</code> vira, no Lark:</p>
+<pre><code>FAIXA 'faixa'  ID 'baixo'  COLON ':'  NOTA_KW 'nota'  LSQB '['  NOTA 'c2'  TILDE '~'
+LESSTHAN '&lt;'  NOTA 'eb2'  NOTA 'g2'  MORETHAN '&gt;'  RSQB ']'  COM 'com'  ID 'grave'
+DOT '.'  ID 'lento'  LPAR '('  NUMERO '2'  RPAR ')'  SEMICOLON ';'</code></pre>
+      <p>Os nomes <code>LSQB</code>, <code>TILDE</code>, <code>COLON</code> etc. são os nomes automáticos que o Lark dá aos símbolos literais da gramática. Palavras reservadas viram tokens com o próprio nome em maiúsculas (<code>FAIXA</code>, <code>COM</code>).</p>
+
+      <h3>Os terminais</h3>
+<pre><code data-lang="lark">NOTA.3   : /[a-g](#|b)?[0-9](?![A-Za-z0-9_#])/      // c4, f#3, eb2, b3, bb3
+SOM.3    : /(bd|sd|hh|oh|cp)(?![A-Za-z0-9_])/       // bateria sintetizada
+ONDA.3   : /(senoide|quadrada|serra|triangulo)(?![A-Za-z0-9_])/
+
+NOTA_KW  : "nota"
+BATERIA_KW : "bateria"
+VOLUME   : "volume"
+
+NUMERO   : /-?[0-9]+(\.[0-9]+)?/
+STRING   : /"[^"\n]*"/
+ID       : /[a-zA-Z_][a-zA-Z0-9_]*/
+
+COMENTARIO : /\/\/[^\n]*/
+%import common.WS
+%ignore WS
+%ignore COMENTARIO</code></pre>
+
+      <h4>Lendo as expressões regulares</h4>
+      <ul>
+        <li><code>[a-g](#|b)?[0-9]</code>: uma letra de a a g, opcionalmente <code>#</code> ou <code>b</code>, e um dígito. Por isso <code>b3</code> é si 3 e <code>bb3</code> é si bemol 3: o primeiro <code>b</code> é a letra e o segundo é o acidente.</li>
+        <li><code>-?[0-9]+(\.[0-9]+)?</code>: inteiro ou decimal, com sinal opcional (necessário para <code>.transpor(-12)</code>).</li>
+        <li><code>%ignore WS</code> e <code>%ignore COMENTARIO</code>: o lexer reconhece espaços e comentários, mas não os entrega ao parser.</li>
+      </ul>
+
+      <h3>Os conflitos léxicos e como foram resolvidos</h3>
+      <p>Esta é uma das partes mais "de compiladores" do trabalho, então vale entender bem. Vários terminais podem casar com o mesmo texto:</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Texto</th><th>Poderia ser</th><th>É</th><th>Mecanismo</th></tr></thead>
+        <tbody>
+          <tr><td><code>c4</code></td><td>NOTA ou ID</td><td>NOTA</td><td>prioridade <code>.3</code> (padrão é 0)</td></tr>
+          <tr><td><code>bd</code></td><td>SOM ou ID (nunca NOTA, falta o dígito)</td><td>SOM</td><td>prioridade <code>.3</code></td></tr>
+          <tr><td><code>tempo</code></td><td>palavra reservada ou ID</td><td>reservada</td><td>o Lark dá preferência a literais de string que colidem com um regex</td></tr>
+          <tr><td><code>tempos</code></td><td>reservada <code>tempo</code> + <code>s</code>, ou ID</td><td>ID</td><td>o Lark só aplica a reservada se o lexema inteiro for igual</td></tr>
+          <tr><td><code>c4e4</code></td><td>NOTA <code>c4</code> + NOTA <code>e4</code>, ou ID</td><td>ID (e erro sintático)</td><td><em>lookahead</em> negativo <code>(?![A-Za-z0-9_#])</code></td></tr>
+          <tr><td><code>serrote</code></td><td>ONDA <code>serra</code> + <code>te</code>, ou ID</td><td>ID</td><td><em>lookahead</em> negativo</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="key"><span class="k-title">O lookahead negativo, explicado</span>
+      <code>(?!X)</code> numa regex significa "só case se o que vem logo depois <strong>não</strong> for X", sem consumir nada. Sem ele, a prioridade da NOTA faria <code>c4x</code> ser lido como NOTA <code>c4</code> seguida de ID <code>x</code>: o lexer pegaria só o prefixo. Com ele, a NOTA só casa quando a palavra termina ali. Assim <code>c4x</code> vira um ID inteiro, que o parser rejeita com uma mensagem clara e a dica "separe os passos com espaços".</div>
+
+      <h3>O lexer contextual e a função <code>_id</code></h3>
+      <p>O Lark com LALR usa por padrão um <strong>lexer contextual</strong>: em cada estado do parser, ele só tenta os terminais que aquele estado aceita. Isso ajuda (por exemplo, <code>volume</code> pode ser palavra reservada dentro de <code>instrumento</code> e nome de transformação depois do ponto), mas tem um efeito colateral. Onde só cabe um ID, como em <code>padrao ___ =</code>, o lexer aceitaria <code>tocar</code>, <code>bd</code> ou <code>c4</code> como nome, porque os terminais concorrentes nem são tentados naquele estado.</p>
+      <p>A especificação diz que reservadas, notas e sons <strong>têm prioridade sobre ID</strong>. Por isso o parser faz uma checagem explícita sempre que constrói um identificador:</p>
+<pre><code data-lang="py">RESERVADAS = {"tempo", "instrumento", "onda", "volume", "padrao", "faixa",
+              "nota", "bateria", "com", "tocar", "ciclos", "salvar"}
+_RE_NOTA = re.compile(r"[a-g](#|b)?[0-9]")
+_SONS = {"bd", "sd", "hh", "oh", "cp"}
+
+def _id(tok: Token) -&gt; str:
+    nome = str(tok)
+    if nome in RESERVADAS:
+        motivo = "é palavra reservada"
+    elif nome in _SONS:
+        motivo = "é um som de bateria"
+    elif _RE_NOTA.fullmatch(nome):
+        motivo = "é uma nota"
+    else:
+        return nome
+    raise ErroSintatico(f"'{nome}' {motivo} e não pode ser usado como identificador",
+                        tok.line, tok.column, len(tok))</code></pre>
+      <div class="say"><span class="k-title">Como explicar</span>"O lexer contextual do Lark só considera os tokens válidos no estado atual. Isso é bom para <code>volume</code>, que é reservada e também nome de transformação, mas deixaria passar <code>tocar</code> como identificador. Para manter a regra da especificação, rejeito explicitamente reservadas, notas e sons onde se espera um ID. Um teste cobre esse caso."</div>
+
+      <h3>Erros léxicos</h3>
+      <p>Quando nenhum terminal casa com o caractere atual, o Lark lança <code>UnexpectedCharacters</code>, que o parser converte em <code>ErroLexico</code> com linha e coluna. Uma aspa sem fechamento tem mensagem especial:</p>
+<pre><code>exemplos/erros/lexico_caractere.ritmo:2:22: erro léxico: caractere inesperado '$'
+ 2 | faixa a: bateria [bd $ sd];
+   |                      ^</code></pre>
+    </div>
+  </section>
+
+  <!-- ===================================================== 05 -->
+  <section class="cap" id="sintatico">
+    <div class="prose">
+      <div class="cap-head"><span class="num">05</span><h2>Fase 2 · Análise sintática</h2><span class="file">gramatica.lark (regras) · parser.py</span></div>
+      <p>O analisador sintático (<em>parser</em>) verifica se a sequência de tokens segue a gramática e constrói a <strong>árvore de derivação</strong>, que mostra qual regra gerou cada pedaço do texto.</p>
+
+      <h3>A gramática formal (EBNF)</h3>
+<pre><code data-lang="ebnf">programa        ::= { declaracao }
+declaracao      ::= cfg_tempo | def_instrumento | def_padrao | faixa | tocar
+
+cfg_tempo       ::= "tempo" NUMERO ";"
+def_instrumento ::= "instrumento" ID "{" { propriedade ";" } "}"
+propriedade     ::= "onda" ONDA | "volume" NUMERO
+def_padrao      ::= "padrao" ID "=" padrao ";"
+faixa           ::= "faixa" ID ":" fonte { transformacao } ";"
+fonte           ::= ("nota" | "bateria") (padrao | ID) [ "com" ID ]
+transformacao   ::= "." (ID | "volume") "(" [ NUMERO ] ")"
+tocar           ::= "tocar" NUMERO "ciclos" [ "salvar" STRING ] ";"
+
+(* mini-notação: da MENOR para a MAIOR precedência *)
+padrao          ::= "[" camadas "]"
+camadas         ::= sequencia { "," sequencia }
+sequencia       ::= passo { passo }
+passo           ::= atomo { modificador }
+modificador     ::= "*" NUMERO | "/" NUMERO
+atomo           ::= NOTA | SOM | "~" | "[" camadas "]" | "&lt;" sequencia "&gt;"</code></pre>
+      <p>Notação: <code>{ x }</code> é zero ou mais repetições, <code>[ x ]</code> é opcional e <code>|</code> é alternativa. Entre aspas ficam os terminais literais.</p>
+      <p>A gramática cobre os itens que o professor pediu: <strong>estrutura dos comandos</strong> (as 5 declarações), <strong>tipos de dados</strong> (NUMERO, NOTA, SOM, ONDA, STRING, padrão), <strong>identificadores</strong> (ID), <strong>delimitadores</strong> (<code>; { } [ ] &lt; &gt; ( ) : , .</code>) e <strong>precedência</strong> (os níveis da mini-notação).</p>
+
+      <h3>A mesma gramática na notação do Lark</h3>
+<pre><code data-lang="lark">programa        : declaracao*
+
+?declaracao     : cfg_tempo | def_instrumento | def_padrao | faixa | tocar
+
+propriedade     : "onda" ONDA           -&gt; prop_onda
+                | VOLUME NUMERO         -&gt; prop_volume
+
+fonte           : tipo_fonte (padrao | ID) ["com" ID]
+
+camadas         : sequencia ("," sequencia)*
+sequencia       : passo+
+passo           : atomo modificador*
+
+?modificador    : "*" NUMERO            -&gt; mod_rapido
+                | "/" NUMERO            -&gt; mod_lento
+
+?atomo          : NOTA                  -&gt; nota
+                | SOM                   -&gt; som
+                | "~"                   -&gt; pausa
+                | "[" camadas "]"       -&gt; grupo
+                | "&lt;" sequencia "&gt;"     -&gt; alterna</code></pre>
+      <ul>
+        <li><code>?regra</code>: regra "inline". Se ela tiver um único filho, o nó desaparece da árvore e o filho sobe. Por isso não aparece um nó <code>declaracao</code> envolvendo cada declaração.</li>
+        <li><code>-&gt; nome</code>: apelido. Cada alternativa vira um nó com nome próprio (<code>nota</code>, <code>pausa</code>, <code>mod_rapido</code>), e o Transformer tem um método para cada um.</li>
+        <li><code>[x]</code> versus <code>x?</code>: com <code>maybe_placeholders=True</code>, um <code>[x]</code> ausente vira <code>None</code> na lista de filhos, e <code>x?</code> simplesmente some. Isso permite desempacotar os filhos com segurança (<code>tipo, conteudo, instr = filhos</code>).</li>
+        <li>Literais anônimos como <code>"faixa"</code> e <code>";"</code> são filtrados da árvore. Só sobram os terminais nomeados, que carregam informação.</li>
+      </ul>
+
+      <h3>Como a precedência é codificada</h3>
+      <p>Não existe uma "tabela de precedência" no código. A precedência está <strong>na forma da gramática</strong>, numa escada de níveis: cada nível só pode conter elementos do nível de baixo. Quanto mais fundo o nível, mais forte ele "gruda".</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Nível</th><th>Regra</th><th>Operador</th><th>Força</th></tr></thead>
+        <tbody>
+          <tr><td>1 (mais externo)</td><td><code>camadas</code></td><td><code>,</code></td><td>liga mais fraco</td></tr>
+          <tr><td>2</td><td><code>sequencia</code></td><td>justaposição (espaço)</td><td>médio</td></tr>
+          <tr><td>3</td><td><code>passo</code></td><td><code>*n /n</code> (pós-fixos)</td><td>liga mais forte</td></tr>
+          <tr><td>4 (folhas)</td><td><code>atomo</code></td><td><code>[ ]</code> e <code>&lt; &gt;</code> reiniciam a escada</td><td>—</td></tr>
+        </tbody>
+      </table></div>
+      <p>Exemplo: <code>[bd sd*2, hh]</code>. A vírgula é o nível mais externo, então ela separa primeiro: <code>(bd sd*2)</code> e <code>(hh)</code>. Dentro da primeira sequência, o <code>*2</code> é pós-fixo, então se prende só ao <code>sd</code>. Resultado: <code>((bd (sd*2)), hh)</code>. Veja a árvore de derivação real produzida pelo Lark (<code>--mostrar-arvore</code>):</p>
+<pre><code class="tree">camadas
+  sequencia
+    passo
+      som     bd
+    passo
+      som     sd
+      mod_rapido  2        ← o *2 está DENTRO do passo do sd
+  sequencia                ← a vírgula separou duas sequências
+    passo
+      som     hh</code></pre>
+      <p>É o mesmo princípio de <code>expr → termo → fator</code> nas gramáticas de expressões aritméticas, onde <code>*</code> liga mais forte que <code>+</code> porque fica num nível mais fundo.</p>
+
+      <h4>Associatividade</h4>
+      <ul>
+        <li><strong>Modificadores pós-fixos</strong>: <code>bd*2/3</code> é <code>(bd*2)/3</code>. A regra <code>atomo modificador*</code> lê os modificadores da esquerda para a direita, e o Transformer os aplica nessa ordem, cada um envolvendo o resultado anterior (veja a seção 06).</li>
+        <li><strong>Transformações</strong>: <code>.transpor(12).volume(0.6)</code> vira <code>volume(0.6, transpor(12, p))</code>, ou seja, associativas à esquerda e aplicadas em ordem.</li>
+        <li>Modificadores só valem <strong>dentro</strong> de colchetes. <code>[bd sd]*2</code> é erro sintático, porque depois do <code>]</code> do padrão a gramática espera <code>com</code>, <code>.</code> ou <code>;</code>. O certo é <code>[[bd sd]*2]</code> ou <code>.rapido(2)</code>.</li>
+      </ul>
+
+      <h3>Por que LALR(1)</h3>
+      <p>O Lark oferece dois algoritmos: <strong>Earley</strong>, que aceita qualquer gramática livre de contexto, inclusive ambígua, mas é mais lento, e <strong>LALR(1)</strong>. Escolhi LALR(1) por quatro motivos:</p>
+      <ol>
+        <li><strong>A gramática é determinística</strong>. Com um único token de lookahead dá para decidir cada passo. Se não fosse, o Lark recusaria a gramática já na construção, acusando conflito <em>shift/reduce</em> ou <em>reduce/reduce</em>. Ou seja, o próprio Lark <strong>prova</strong> que a gramática não é ambígua.</li>
+        <li>É <strong>linear</strong> no tamanho da entrada.</li>
+        <li>Permite o <strong>lexer contextual</strong>, que resolve o caso do <code>volume</code>.</li>
+        <li>Dá mensagens de erro precisas, com o conjunto exato de tokens esperados.</li>
+      </ol>
+      <div class="key"><span class="k-title">Como o LALR funciona, em 4 frases</span>
+      É um parser <strong>ascendente</strong> (bottom-up): lê tokens da esquerda para a direita e os empilha (<em>shift</em>). Quando o topo da pilha forma o lado direito de uma regra, ele o substitui pelo não terminal (<em>reduce</em>). Uma tabela pré-calculada a partir da gramática, consultada com o estado atual mais <strong>1</strong> token de lookahead, diz se é hora de shift, de reduce ou de erro. A árvore é montada de baixo para cima, das folhas até <code>programa</code>.</div>
+      <p>A gramática também é praticamente LL(1). Daria para escrever um parser descendente recursivo à mão, com uma função por regra, e o laboratório da seção 02 faz exatamente isso em JavaScript para a mini-notação. Vale mencionar na apresentação: mostra que você entende as duas abordagens.</p>
+
+      <h3>Erros sintáticos</h3>
+      <p>O Lark lança <code>UnexpectedToken</code> (ou <code>UnexpectedEOF</code>), e o parser converte em <code>ErroSintatico</code>. Duas melhorias foram feitas:</p>
+      <ul>
+        <li><strong>Lista exata de esperados.</strong> O LALR às vezes faz reduções "por padrão" antes de perceber o erro, e o conjunto <code>e.expected</code> fica maior do que deveria. Por isso o parser consulta o <code>interactive_parser.accepts()</code>, que diz exatamente quais tokens seriam aceitos naquele ponto.</li>
+        <li><strong>Dicas.</strong> Por exemplo, se um <code>;</code> era esperado e o token inesperado está na coluna 1, a dica é "faltou ';' no fim da linha anterior?".</li>
+      </ul>
+<pre><code>exemplos/erros/sintatico_ponto_virgula.ritmo:3:1: erro sintático: token inesperado 'tocar'; esperado: '.', ';', 'com'
+ 3 | tocar 2 ciclos;
+   | ^^^^^
+   = dica: faltou ';' no fim da linha anterior?</code></pre>
+    </div>
+  </section>
+
+  <!-- ===================================================== 06 -->
+  <section class="cap" id="ast">
+    <div class="prose">
+      <div class="cap-head"><span class="num">06</span><h2>Fase 3 · A AST</h2><span class="file">parser.py (ConstrutorAST) · ast_nos.py</span></div>
+      <p>A árvore de derivação do Lark é <strong>concreta</strong>: ela espelha a gramática, com nós como <code>passo</code>, <code>tipo_fonte</code> e <code>padrao</code>, e guarda tokens soltos. A <strong>AST</strong> (árvore sintática <em>abstrata</em>) guarda só o que importa para o significado, com nós tipados e posição no código.</p>
+
+      <h3>Concreta × abstrata, lado a lado</h3>
+      <p>Programa: <code>faixa baixo: nota [c2 ~ &lt;eb2 g2&gt;] com grave .lento(2);</code></p>
+    </div>
+    <div class="lab-grid" style="margin-bottom:18px">
+      <div class="panel"><div class="code-label">árvore concreta (Lark) · --mostrar-arvore</div>
+<pre><code class="tree">faixa
+  baixo
+  fonte
+    tipo_fonte  nota
+    padrao
+      camadas
+        sequencia
+          passo
+            nota  c2
+          passo
+            pausa
+          passo
+            alterna
+              sequencia
+                passo
+                  nota  eb2
+                passo
+                  nota  g2
+    grave
+  transformacao
+    nome_transf  lento
+    2</code></pre></div>
+      <div class="panel"><div class="code-label">AST · --mostrar-ast</div>
+<pre><code class="tree">Faixa baixo
+├── Fonte nota com grave
+│   └── Camadas
+│       └── Sequencia
+│           ├── Nota c2 (midi 36)
+│           ├── Pausa ~
+│           └── Alterna &lt; &gt;
+│               ├── Nota eb2 (midi 39)
+│               └── Nota g2 (midi 43)
+└── .lento(2)</code></pre></div>
+    </div>
+    <div class="prose">
+      <p>O que mudou: os nós <code>passo</code> e <code>padrao</code> sumiram. O <code>grupo</code> <code>[ ]</code> vira a própria <code>Camadas</code>. O <code>tipo_fonte</code> e o instrumento viraram campos da <code>Fonte</code>. A nota ganhou sua altura MIDI. Os colchetes, os pontos e os ponto-e-vírgulas, que só existiam para delimitar, não aparecem mais.</p>
+
+      <h3>Os nós (dataclasses)</h3>
+<pre><code data-lang="py">@dataclass
+class Pos:
+    linha: int = 0
+    coluna: int = 0
+    comprimento: int = 1
+
+@dataclass
+class Numero(No):
+    texto: str                         # guarda o texto original ("1.5")
+    pos: Pos = field(default_factory=Pos)
+
+    @property
+    def valor(self):  return float(self.texto) if "." in self.texto else int(self.texto)
+
+@dataclass
+class Rapido(No):
+    fator: Numero
+    alvo: No                           # o nó que é acelerado
+    pos: Pos = field(default_factory=Pos)
+
+@dataclass
+class Fonte(No):
+    tipo: str                          # "nota" | "bateria"
+    padrao: Optional[Camadas]            # padrão literal ...
+    ref: Optional[Ref]                 # ... ou referência a um padrão nomeado
+    instrumento: Optional[Ref]</code></pre>
+      <p>Lista completa: <code>Programa</code>, <code>Tempo</code>, <code>Instrumento</code>, <code>Propriedade</code>, <code>DefPadrao</code>, <code>Faixa</code>, <code>Fonte</code>, <code>Transformacao</code>, <code>Tocar</code>, <code>Ref</code>, <code>Numero</code> e, na mini-notação, <code>Camadas</code>, <code>Sequencia</code>, <code>Nota</code>, <code>Som</code>, <code>Pausa</code>, <code>Alterna</code>, <code>Rapido</code> e <code>Lento</code>.</p>
+      <div class="note"><span class="k-title">Por que guardar o texto do número?</span>
+      O gerador escreve o número no Python exatamente como o usuário digitou (<code>1.5</code>), e o runtime o converte em fração exata com <code>Fraction("1.5")</code> = 3/2. Converter para <code>float</code> cedo demais introduziria erros de arredondamento (<code>0.1</code> não é representável em binário).</div>
+
+      <h3>O Transformer: de árvore concreta para AST</h3>
+      <p>O <code>ConstrutorAST</code> é um <code>lark.Transformer</code>. Para cada nó da árvore concreta, ele chama o método com o mesmo nome da regra (ou do apelido), passando os filhos <strong>já transformados</strong>. O percurso é de baixo para cima (pós-ordem), como num esquema de <strong>tradução dirigida pela sintaxe</strong> com atributos sintetizados.</p>
+<pre><code data-lang="py">@v_args(meta=True)                      # cada método recebe (meta, filhos); meta tem linha/coluna
+class ConstrutorAST(Transformer):
+
+    def nota(self, meta, filhos):
+        return A.Nota(str(filhos[0]), _pos_tok(filhos[0]))
+
+    def grupo(self, meta, filhos):      # "[" camadas "]"  → devolve as camadas; os colchetes somem
+        return filhos[0]
+
+    def fonte(self, meta, filhos):
+        tipo, conteudo, instr = filhos  # graças a maybe_placeholders, instr pode ser None
+        ...
+
+    def passo(self, meta, filhos):
+        no, *mods = filhos              # átomo + modificadores, na ordem do texto
+        for tipo, args, pos in mods:    # dobra à esquerda: cada modificador envolve o anterior
+            if tipo == "rapido":
+                no = A.Rapido(args[0], no, pos)
+            elif tipo == "lento":
+                no = A.Lento(args[0], no, pos)
+        return no</code></pre>
+      <p>O método <code>passo</code> é onde a <strong>associatividade à esquerda</strong> dos modificadores vira estrutura. Para <code>bd*2/3</code>, o laço faz primeiro <code>Rapido(2, bd)</code> e depois <code>Lento(3, Rapido(2, bd))</code>.</p>
+      <p>Os métodos dos modificadores (<code>mod_rapido</code>, <code>mod_lento</code>…) não criam nós. Eles devolvem tuplas <code>("rapido", [Numero], pos)</code>, que o <code>passo</code> consome. Assim o nó só é criado quando já se sabe quem é o alvo.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================== 07 -->
+  <section class="cap" id="semantico">
+    <div class="prose">
+      <div class="cap-head"><span class="num">07</span><h2>Fase 4 · Análise semântica</h2><span class="file">semantico.py</span></div>
+      <p>Uma gramática livre de contexto só verifica a <strong>forma</strong>. Ela não consegue checar coisas como "este instrumento foi declarado?", "este padrão tem notas, mas a faixa é de bateria" ou "volume 1.5 está fora do intervalo". Essas propriedades dependem de <strong>contexto</strong> (o que foi declarado em outro lugar) ou de <strong>valores</strong>, e por isso ficam na análise semântica.</p>
+
+      <h3>Duas passadas sobre a AST</h3>
+      <ol>
+        <li><strong>Declarações:</strong> percorre o programa e registra todos os instrumentos e padrões na tabela de símbolos, verificando duplicidade, propriedades e o tipo de cada padrão.</li>
+        <li><strong>Usos:</strong> percorre as faixas e confere cada referência contra a tabela.</li>
+      </ol>
+      <p>Com duas passadas, a ordem das declarações não importa: dá para usar um instrumento antes de declará-lo. O gerador, por sua vez, emite sempre instrumentos e padrões antes das faixas, para o Python não reclamar de nome indefinido.</p>
+
+      <h3>A tabela de símbolos</h3>
+<pre><code data-lang="py">@dataclass
+class InfoInstrumento:
+    no: A.Instrumento
+    onda: str = "senoide"
+    volume: float = 0.8
+    usado: bool = False          # para o aviso "declarado e nunca usado"
+
+@dataclass
+class InfoPadrao:
+    no: A.DefPadrao
+    tipo: Optional[str]          # "nota", "bateria" ou None (só pausas)
+    usado: bool = False
+
+@dataclass
+class TabelaSimbolos:
+    bpm: float = 120
+    instrumentos: Dict[str, InfoInstrumento]
+    padroes: Dict[str, InfoPadrao]
+    faixas: Dict[str, A.Faixa]
+    tocar: Optional[A.Tocar] = None</code></pre>
+      <p>São <strong>três espaços de nomes separados</strong> (instrumentos, padrões e faixas), um dicionário para cada. Cada categoria aparece num contexto sintático diferente (<code>com X</code> é sempre instrumento e <code>nota X</code> é sempre padrão), então não há ambiguidade. Por isso <code>faixa groove: bateria groove;</code> é válido.</p>
+
+      <h3>Inferência do "tipo" de um padrão</h3>
+      <p>Um padrão é um tipo composto, e seu conteúdo é de <em>notas</em> ou de <em>sons de bateria</em>. A função <code>_tipo_padrao</code> coleta todas as folhas da subárvore (<code>Nota</code> e <code>Som</code>) e compara cada uma com a primeira:</p>
+<pre><code data-lang="py">def _tipo_padrao(self, raiz):
+    folhas = []
+    self._percorrer(raiz, folhas)        # também valida *0 e /0
+    tipo, primeira = None, None
+    for f in folhas:
+        t = "nota" if isinstance(f, A.Nota) else "bateria"
+        if tipo is None:
+            tipo, primeira = t, f
+        elif t != tipo:
+            self.erros.append(_erro(f"padrão mistura ... : '{nome}'", f.pos, dica))
+            break
+    return tipo                          # None se só houver pausas</code></pre>
+      <p>Um padrão só de pausas tem tipo <code>None</code> ("neutro") e é compatível com os dois tipos de faixa. O tipo de um <strong>padrão nomeado</strong> fica guardado na tabela e é verificado <strong>no ponto de uso</strong>: <code>padrao m = [c4 e4]; faixa a: bateria m;</code> dá erro na linha da faixa, que é onde está a incompatibilidade.</p>
+
+      <h3>Todas as verificações</h3>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>Verificação</th><th>Onde</th><th>Arquivo de exemplo</th></tr></thead>
+      <tbody>
+        <tr><td>instrumento ou padrão não declarado</td><td><code>_verificar_faixa</code></td><td><code>sem_instrumento_nao_declarado</code>, <code>sem_padrao_nao_declarado</code></td></tr>
+        <tr><td>duplicidade (instrumento, padrão, faixa)</td><td><code>_declarar_*</code>, <code>_verificar_faixa</code></td><td><code>sem_duplicidade</code></td></tr>
+        <tr><td><code>bateria</code> com notas / <code>nota</code> com sons de bateria</td><td><code>_verificar_faixa</code></td><td><code>sem_bateria_com_notas</code></td></tr>
+        <tr><td>padrão misturando notas e bateria</td><td><code>_tipo_padrao</code></td><td><code>sem_padrao_misto</code></td></tr>
+        <tr><td><code>com</code> em faixa de <code>bateria</code></td><td><code>_verificar_faixa</code></td><td><code>sem_com_em_bateria</code></td></tr>
+        <tr><td>transformação desconhecida / aridade errada</td><td><code>_verificar_transformacao</code></td><td><code>sem_transformacao_desconhecida</code>, <code>sem_aridade</code></td></tr>
+        <tr><td><code>*0</code>, <code>/0</code>, <code>rapido</code>/<code>lento</code> ≤ 0, <code>volume</code> ∉ [0,1]</td><td><code>_percorrer</code>, <code>_verificar_transformacao</code></td><td><code>sem_argumento_invalido</code></td></tr>
+        <tr><td><code>transpor</code> não inteiro, ou em faixa de <code>bateria</code></td><td><code>_verificar_transformacao</code></td><td><code>sem_transpor_nao_inteiro</code></td></tr>
+        <tr><td>propriedade de instrumento repetida</td><td><code>_declarar_instrumento</code></td><td><code>sem_propriedade_repetida</code></td></tr>
+        <tr><td><code>tempo</code> ≤ 0 ou repetido; ciclos ≤ 0 ou não inteiros</td><td><code>analisar</code>, <code>_verificar_tocar</code></td><td><code>sem_tempo_duplicado</code>, <code>sem_tempo_e_ciclos_invalidos</code></td></tr>
+        <tr><td><code>tocar</code> ausente ou repetido, nenhuma faixa</td><td><code>analisar</code></td><td><code>sem_sem_tocar</code>, <code>sem_dois_tocar</code>, <code>sem_sem_faixa</code></td></tr>
+      </tbody>
+    </table></div>
+    <div class="prose">
+      <p><strong>Avisos</strong> (não interrompem): <code>tempo</code> ausente, instrumento ou padrão nunca usado, faixa de nota sem <code>com</code>, instrumento sem <code>onda</code> e arquivo de saída sem <code>.wav</code>.</p>
+
+      <h3>Coletar todos os erros</h3>
+      <p>O analisador não para no primeiro erro. Ele acumula tudo em <code>self.erros</code> e, no final, lança <code>ErrosSemanticos</code> com a lista ordenada por posição. É o comportamento dos compiladores de verdade: o usuário corrige vários problemas numa rodada só. Isso funciona aqui porque, depois do parse, a AST está completa, então um erro semântico não impede a análise do resto.</p>
+<pre><code>exemplos/erros/sem_argumento_invalido.ritmo:2:22: erro semântico: '*0': o fator deve ser &gt; 0
+ 2 | faixa a: bateria [bd*0 sd/0] .lento(-1) .volume(1.5);
+   |                      ^
+exemplos/erros/sem_argumento_invalido.ritmo:2:27: erro semântico: '/0': o fator deve ser &gt; 0
+ ...
+compilação interrompida: 4 erro(s)</code></pre>
+      <div class="note"><span class="k-title">Por que léxico e sintático param no primeiro erro?</span>
+      Porque, depois de um erro de sintaxe, o parser não sabe em que estado está, e continuar geraria erros em cascata sem sentido. Recuperação de erros sintáticos (modo pânico, sincronização em <code>;</code>) seria uma extensão possível.</div>
+
+      <h3>Mensagens com linha, coluna e trecho</h3>
+      <p>Cada nó da AST tem um <code>Pos(linha, coluna, comprimento)</code>, que vem do token (<code>tok.line</code>, <code>tok.column</code>) ou do <code>meta</code> do Lark. A função <code>formatar_mensagem</code> em <code>erros.py</code> imprime a linha do código e coloca <code>^^^</code> embaixo da coluna exata, no estilo do <code>gcc</code> e do <code>rustc</code>.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================== 08 -->
+  <section class="cap" id="gerador">
+    <div class="prose">
+      <div class="cap-head"><span class="num">08</span><h2>Fase 5 · Geração de código</h2><span class="file">gerador.py</span></div>
+      <p>O gerador percorre a AST e escreve código Python. A regra central, e que precisa ser defendida: <strong>ele não calcula eventos</strong>. Cada nó vira uma <strong>chamada de função</strong> de um combinador do runtime, então o código gerado tem a mesma forma da árvore.</p>
+
+      <h3>Tradução nó a nó</h3>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>Nó da AST</th><th>Código gerado</th></tr></thead>
+      <tbody>
+        <tr><td><code>Nota c4</code></td><td><code>nota("c4")</code></td></tr>
+        <tr><td><code>Som bd</code></td><td><code>som("bd")</code></td></tr>
+        <tr><td><code>Pausa</code></td><td><code>silencio()</code></td></tr>
+        <tr><td><code>Sequencia [a, b, c]</code></td><td><code>seq(A, B, C)</code>, ou só <code>A</code> se tiver um elemento</td></tr>
+        <tr><td><code>Camadas [s1, s2]</code></td><td><code>stack(S1, S2)</code>, ou só <code>S1</code> se tiver uma sequência</td></tr>
+        <tr><td><code>Alterna [a, b]</code></td><td><code>alterna(A, B)</code></td></tr>
+        <tr><td><code>Rapido(2, x)</code> / <code>Lento(2, x)</code></td><td><code>rapido(2, X)</code> / <code>lento(2, X)</code></td></tr>
+        <tr><td><code>.transf(n)</code> sobre <code>P</code></td><td><code>transf(n, P)</code></td></tr>
+      </tbody>
+    </table></div>
+    <div class="prose">
+<pre><code data-lang="py">def expr_padrao(no: A.No) -&gt; str:
+    if isinstance(no, A.Nota):
+        return f'nota("{no.texto}")'
+    if isinstance(no, A.Pausa):
+        return "silencio()"
+    if isinstance(no, A.Sequencia):
+        partes = [expr_padrao(p) for p in no.passos]
+        return partes[0] if len(partes) == 1 else f"seq({', '.join(partes)})"
+    if isinstance(no, A.Rapido):
+        return f"rapido({no.fator.texto}, {expr_padrao(no.alvo)})"
+    ...</code></pre>
+      <p>É uma função <strong>recursiva</strong> com um caso por tipo de nó, ou seja, tradução dirigida pela sintaxe. A string de cada nó é montada a partir das strings dos filhos.</p>
+
+      <h4>Transformações: dobra à esquerda</h4>
+<pre><code data-lang="py">expr = f"p_{fonte.ref.nome}" if fonte.ref is not None else expr_padrao(fonte.padrao)
+for tr in f.transformacoes:          # associativas à esquerda
+    expr = expr_transformacao(tr, expr)</code></pre>
+      <p>Para <code>.transpor(12) .volume(0.6)</code>: primeiro <code>transpor(12, P)</code>, depois <code>volume(0.6, transpor(12, P))</code>. A transformação mais à esquerda fica mais <em>dentro</em> e é aplicada primeiro.</p>
+
+      <h3>O script gerado</h3>
+      <p>Para o programa da seção 06, com <code>--emitir</code>:</p>
+<pre><code data-lang="py">BPM = 120
+CICLOS = 4
+
+# --- instrumentos ---
+# linha 2: instrumento grave
+i_grave = Instrumento("serra", 0.7)
+
+# --- faixas ---
+faixas = []
+# linha 3: faixa baixo
+f_baixo = lento(2, seq(nota("c2"), silencio(), alterna(nota("eb2"), nota("g2"))))
+faixas.append(Faixa("baixo", f_baixo, i_grave))
+
+# linha 4: tocar
+tocar(faixas, bpm=BPM, ciclos=CICLOS, arquivo=None, reproduzir=True, arquivo_padrao='mini.wav')</code></pre>
+      <p>Compare <code>f_baixo</code> com a AST: <code>Lento</code> → <code>Sequencia</code> → (<code>Nota</code>, <code>Pausa</code>, <code>Alterna</code> → (<code>Nota</code>, <code>Nota</code>)). É a mesma árvore, escrita como chamadas aninhadas. Os comentários <code># linha N</code> ligam cada trecho à linha do fonte.</p>
+      <ul>
+        <li><strong>Prefixos</strong> <code>i_</code>, <code>p_</code> e <code>f_</code>: evitam que um nome do usuário colida com o runtime. Uma faixa chamada <code>seq</code> sobrescreveria a função <code>seq</code>.</li>
+        <li><strong>Ordem fixa</strong>: instrumentos → padrões → faixas → <code>tocar</code>, independente da ordem no fonte (isso permite usar antes de declarar).</li>
+        <li><strong>Runtime embutido</strong>: antes desse trecho, o gerador cola o conteúdo de <code>runtime/padroes.py</code> e <code>runtime/sintese.py</code>. O script fica <strong>autocontido</strong> e roda sozinho com <code>python out.py</code>.</li>
+      </ul>
+
+      <h3>Execução: o one-step pipeline</h3>
+      <p>O <code>main.py</code> chama <code>compile(codigo, "&lt;gerado de demo.ritmo&gt;", "exec")</code> e <code>exec</code> num dicionário de escopo novo. Nenhum arquivo intermediário é criado: o Python gerado só existe na memória.</p>
+      <div class="say"><span class="k-title">Como explicar "por que não pré-calcular"</span>"Se o gerador calculasse os eventos e escrevesse uma lista de notas com horários, o código gerado seria só dados, e a estrutura do programa se perderia. Gerando chamadas de combinadores, cada construção da linguagem tem uma tradução visível, e dá para apontar no <code>--emitir</code> qual nó virou qual chamada. A semântica fica no runtime, como num compilador de verdade, que gera chamadas para a biblioteca da linguagem."</div>
+    </div>
+  </section>
+
+  <!-- ===================================================== 09 -->
+  <section class="cap" id="runtime">
+    <div class="prose">
+      <div class="cap-head"><span class="num">09</span><h2>Runtime · modelo de padrões</h2><span class="file">runtime/padroes.py</span></div>
+      <p>É aqui que a música acontece. O modelo vem do TidalCycles e é muito elegante: <strong>um padrão é uma função</strong>.</p>
+<pre><code data-lang="py">class Evento(NamedTuple):
+    inicio: Fraction
+    fim: Fraction
+    valor: Any                  # Valor("nota", "c4", midi=60, ganho=1.0)
+
+class Padrao:
+    def __init__(self, consulta):   # consulta(inicio, fim) -&gt; [Evento]
+        self.consulta = consulta</code></pre>
+      <p>Perguntar a um padrão "o que acontece entre os ciclos 0 e 2?" é chamar <code>p.query(0, 2)</code>. Cada combinador recebe padrões e devolve um <strong>novo</strong> padrão, uma nova função de consulta que chama as consultas dos filhos e transforma os eventos. Nada é calculado até alguém consultar (avaliação preguiçosa).</p>
+
+      <div class="key"><span class="k-title">Regra simplificada de consulta</span>
+      <code>query(a, b)</code> devolve os eventos cujo <strong>início</strong> está em <code>[a, b)</code>. Cada evento carrega a duração inteira. No Tidal original, um evento que atravessa o limite da consulta é devolvido em pedaços ("fragmentos"). Essa simplificação evita fragmentos e é suficiente porque a renderização consulta <code>[0, N)</code> de uma vez.</div>
+
+      <h3>Por que <code>Fraction</code></h3>
+      <p>Em <code>[a [b c d]]</code>, os passos internos começam em ½, ⅔ e ⅚ do ciclo. Em <code>float</code>, ⅓ é 0,333…, e somar ou multiplicar acumula erro. Depois de 100 ciclos, eventos que deveriam coincidir deixariam de coincidir. Com <code>fractions.Fraction</code>, ⅓ é exatamente 1/3. Os tempos só viram <code>float</code> na síntese, quando são multiplicados pela duração do ciclo em segundos.</p>
+
+      <h3>Os combinadores, um a um</h3>
+
+      <h4><code>pure(v)</code>: o átomo</h4>
+<pre><code data-lang="py">def pure(valor):
+    def consulta(a, b):
+        return [Evento(Fraction(c), Fraction(c + 1), valor)
+                for c in _ciclos(a, b) if a &lt;= c &lt; b]
+    return Padrao(consulta)</code></pre>
+      <p>Um evento ocupando cada ciclo inteiro: <code>(0,1)</code>, <code>(1,2)</code>, <code>(2,3)</code>… <code>_ciclos(a, b)</code> é <code>range(floor(a), ceil(b))</code>. <code>nota("c4")</code> e <code>som("bd")</code> são <code>pure</code> de um <code>Valor</code>.</p>
+
+      <h4><code>rapido(n, p)</code>: comprimir o tempo</h4>
+<pre><code data-lang="py">def rapido(fator, p):
+    n = _frac(fator)
+    def consulta(a, b):
+        return [Evento(e.inicio / n, e.fim / n, e.valor) for e in p.consulta(a * n, b * n)]
+    return Padrao(consulta)</code></pre>
+      <p>Para saber o que <code>p*4</code> faz em [0, 1), pergunta-se ao <code>p</code> original o que acontece em [0, 4) e divide-se os tempos por 4: quatro eventos de ¼. <code>lento(n, p)</code> é simplesmente <code>rapido(1/n, p)</code>.</p>
+
+      <h4><code>alterna(a, b, c)</code>: um filho por ciclo</h4>
+<pre><code data-lang="py">def alterna(*ps):
+    n = len(ps)
+    def consulta(a, b):
+        saida = []
+        for c in _ciclos(a, b):
+            filho = ps[c % n]
+            desloc = c - c // n          # ciclo c do pai = ciclo c//n do filho
+            ini, fim = max(a, c), min(b, c + 1)
+            for e in filho.consulta(ini - desloc, fim - desloc):
+                saida.append(Evento(e.inicio + desloc, e.fim + desloc, e.valor))
+        return saida
+    return Padrao(consulta)</code></pre>
+      <p>A parte sutil é o <code>desloc</code>. Cada filho "vê" só os ciclos em que está ativo, numerados 0, 1, 2… do ponto de vista dele. Com 2 filhos, o filho 0 toca nos ciclos 0, 2, 4 do pai, que para ele são os ciclos 0, 1, 2.</p>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>ciclo do pai <code>c</code></th><th>filho <code>c % 2</code></th><th>ciclo do filho <code>c // 2</code></th><th><code>desloc = c − c//2</code></th></tr></thead>
+      <tbody>
+        <tr><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+        <tr><td>1</td><td>1</td><td>0</td><td>1</td></tr>
+        <tr><td>2</td><td>0</td><td>1</td><td>1</td></tr>
+        <tr><td>3</td><td>1</td><td>1</td><td>2</td></tr>
+        <tr><td>4</td><td>0</td><td>2</td><td>2</td></tr>
+      </tbody>
+    </table></div>
+    <div class="prose">
+      <p>É isso que faz <code>&lt;a &lt;b c&gt;&gt;</code> soar <strong>a b a c</strong>. O filho interno <code>&lt;b c&gt;</code> só é consultado nos ciclos 1 e 3 do pai, que para ele são os ciclos 0 e 1, então ele alterna corretamente entre b e c.</p>
+
+      <h4><code>seq(a, b, c)</code>: a sacada</h4>
+<pre><code data-lang="py">def seq(*ps):
+    return rapido(len(ps), alterna(*ps))</code></pre>
+      <p>Uma sequência de n elementos é uma alternância de n elementos, acelerada n vezes. Exemplo: <code>seq(a, b)</code> no ciclo 0. O <code>rapido(2)</code> consulta a alternância em [0, 2): ciclo 0 → <code>a</code> em (0,1), ciclo 1 → <code>b</code> em (1,2). Dividindo por 2: <code>a</code> em (0, ½) e <code>b</code> em (½, 1). ✔</p>
+      <p>A consequência importante: uma alternância <strong>dentro</strong> de uma sequência funciona sozinha. Em <code>[c4 &lt;b4 c5&gt;]</code>, no ciclo 1 do pai a alternância externa está nos ciclos 2 e 3, e o <code>&lt;b4 c5&gt;</code> recebe o seu ciclo 1, então toca <code>c5</code>. Não é preciso nenhum caso especial.</p>
+
+      <h4><code>stack(a, b)</code>: polifonia</h4>
+      <p>Concatena as listas de eventos de todos os filhos. Simples assim.</p>
+
+      <h4><code>reverso(p)</code>: espelhar cada ciclo</h4>
+<pre><code data-lang="py">def reverso(p):
+    def consulta(a, b):
+        saida = []
+        for c in _ciclos(a, b):
+            eixo = 2 * c + 1                       # t -&gt; (c+1) - (t-c)
+            for e in p.consulta(Fraction(c), Fraction(c + 1)):
+                fim = min(e.fim, Fraction(c + 1))  # eventos longos são cortados no ciclo
+                novo = Evento(eixo - fim, eixo - e.inicio, e.valor)
+                if a &lt;= novo.inicio &lt; b:
+                    saida.append(novo)
+        return saida
+    return Padrao(consulta)</code></pre>
+      <p>Dentro do ciclo c, o instante t vai para <code>c + (c+1 − t)</code> = <code>2c + 1 − t</code>. O <strong>fim</strong> de um evento vira o novo <strong>início</strong>. Por exemplo, <code>[bd ~ ~ ~]</code> no ciclo 1: o <code>bd</code> em (1, 5/4) vai para (3 − 5/4, 3 − 1) = (7/4, 2).</p>
+
+      <h4><code>transpor</code> e <code>volume</code>: mexem no valor</h4>
+      <p>Os dois usam <code>fmap(f, p)</code>, que aplica <code>f</code> ao valor de cada evento sem tocar no tempo. <code>transpor</code> soma semitons ao MIDI (só para notas) e <code>volume</code> multiplica o ganho.</p>
+
+    </div>
+  </section>
+
+  <!-- ===================================================== 10 -->
+  <section class="cap" id="sintese">
+    <div class="prose">
+      <div class="cap-head"><span class="num">10</span><h2>Runtime · síntese de áudio</h2><span class="file">runtime/sintese.py</span></div>
+      <p>A síntese pega os eventos (em ciclos) e os transforma em <strong>amostras</strong>: 44.100 números por segundo entre −1 e 1, em mono, usando <code>numpy</code>.</p>
+
+      <h3>De ciclos para segundos e de MIDI para Hz</h3>
+<pre><code data-lang="py">dur_ciclo = 240.0 / bpm                         # 1 ciclo = 4 tempos de 60/bpm s
+inicio_amostra = round(float(ev.inicio) * dur_ciclo * 44100)
+
+def frequencia(midi):
+    return 440.0 * 2 ** ((midi - 69) / 12)      # lá 4 = MIDI 69 = 440 Hz</code></pre>
+      <p>Cada semitom multiplica a frequência por 2<sup>1/12</sup>, e cada oitava (12 semitons) a dobra.</p>
+
+      <h3>Formas de onda</h3>
+      <p>Com <code>fase = freq · t</code> (em ciclos da onda):</p>
+      <ul>
+        <li><strong>senoide</strong>: <code>sin(2π·fase)</code>. Som puro, sem harmônicos.</li>
+        <li><strong>quadrada</strong>: <code>sign(sin(2π·fase))</code>. Só harmônicos ímpares, som "oco" de videogame.</li>
+        <li><strong>serra</strong>: <code>2·(fase − round(fase))</code>. Rampa, rica em todos os harmônicos, som brilhante.</li>
+        <li><strong>triângulo</strong>: <code>2·|serra| − 1</code>. Harmônicos ímpares fracos, som suave.</li>
+      </ul>
+
+      <h3>Envelope</h3>
+      <p>Se uma onda começa ou termina abruptamente num valor diferente de zero, o alto-falante ouve um "clique". Por isso cada nota é multiplicada por um envelope: sobe de 0 a 1 em 5 ms (ataque) e desce de 1 a 0 nos últimos 50 ms (release).</p>
+
+      <h3>Bateria sintetizada</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Som</th><th>Receita</th></tr></thead>
+        <tbody>
+          <tr><td><code>bd</code> bumbo</td><td>senoide cuja frequência cai de 150 para 50 Hz (<code>50 + 100·e<sup>−25t</sup></code>), com decaimento exponencial. A fase é a soma acumulada da frequência (<code>cumsum</code>), porque a frequência muda.</td></tr>
+          <tr><td><code>sd</code> caixa</td><td>ruído branco (a esteira) + senoide de 180 Hz (o corpo), ambos com decaimento curto</td></tr>
+          <tr><td><code>hh</code> / <code>oh</code></td><td>ruído passa-alta, feito com a diferença entre amostras vizinhas (<code>np.diff</code>, um filtro passa-alta de primeira ordem). Decaimento muito curto (fechado) ou longo (aberto).</td></tr>
+          <tr><td><code>cp</code> palma</td><td>3 rajadas de ruído com 11 ms entre elas + uma cauda, imitando várias mãos</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Mixagem e saída</h3>
+      <ul>
+        <li>Cada faixa é renderizada num buffer e os buffers são somados.</li>
+        <li><strong>Normalização</strong>: se o pico passar de 0,9, tudo é multiplicado por <code>0,9/pico</code>. Isso evita <em>clipping</em> (amostras além de ±1, que distorcem) sem alterar mixagens que já estão baixas.</li>
+        <li>O WAV é gravado com o módulo <code>wave</code> da biblioteca padrão: mono, 16 bits, com as amostras escaladas para inteiros de −32767 a 32767.</li>
+        <li>A reprodução usa <code>sounddevice</code>. Se não estiver disponível, o runtime avisa e só salva o arquivo.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ===================================================== 11 -->
+  <section class="cap" id="cli">
+    <div class="prose">
+      <div class="cap-head"><span class="num">11</span><h2>CLI e testes</h2><span class="file">main.py · testes/</span></div>
+      <div class="tbl"><table>
+        <thead><tr><th>Opção</th><th>Efeito</th></tr></thead>
+        <tbody>
+          <tr><td>(nenhuma)</td><td>compila, executa, salva (se houver <code>salvar</code>) e toca</td></tr>
+          <tr><td><code>--mostrar-ast</code></td><td>imprime a AST e para</td></tr>
+          <tr><td><code>--mostrar-arvore</code></td><td>imprime a árvore de derivação do Lark e para</td></tr>
+          <tr><td><code>--emitir out.py</code></td><td>salva também o Python gerado</td></tr>
+          <tr><td><code>--sem-tocar</code></td><td>não reproduz; grava em <code>&lt;fonte&gt;.wav</code> se não houver <code>salvar</code></td></tr>
+          <tr><td><code>--so-compilar</code></td><td>para depois da geração (útil com <code>--emitir</code>)</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Os 71 testes</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Arquivo</th><th>Cobre</th></tr></thead>
+        <tbody>
+          <tr><td><code>test_padroes.py</code></td><td>cada combinador: tempos exatos de <code>seq</code>, <code>stack</code>, <code>alterna</code> (inclusive aninhada), <code>rapido</code> fracionário, <code>reverso</code></td></tr>
+          <tr><td><code>test_parser.py</code></td><td>precedência (<code>[bd sd*2, hh]</code>), associatividade, notas (<code>b3</code>, <code>bb3</code>, <code>f#5</code>), comentários, posição dos erros, reservadas como ID</td></tr>
+          <tr><td><code>test_semantico.py</code></td><td>cada arquivo de <code>exemplos/erros/</code> com a mensagem esperada; linha e coluna; coleta de vários erros; avisos</td></tr>
+          <tr><td><code>test_gerador.py</code></td><td>código gerado igual ao esperado; execução do script autocontido gerando um WAV válido e normalizado</td></tr>
+        </tbody>
+      </table></div>
+      <p>Um teste garante que <strong>todo</strong> arquivo em <code>exemplos/erros/</code> tem uma expectativa. Se alguém adicionar um exemplo de erro sem teste, a suíte falha.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================== 12 -->
+  <section class="cap" id="decisoes">
+    <div class="prose">
+      <div class="cap-head"><span class="num">12</span><h2>Decisões e limitações</h2></div>
+      <p>Saber as limitações e por que elas existem conta pontos. Mostra que as escolhas foram conscientes.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Decisão</th><th>Motivo</th><th>Custo</th></tr></thead>
+        <tbody>
+          <tr><td>Consulta por início do evento (sem fragmentos)</td><td>modelo mais simples de explicar e implementar</td><td>eventos longos não são cortados no meio; <code>reverso</code> precisa cortar no fim do ciclo</td></tr>
+          <tr><td>Espaços de nomes separados por categoria</td><td>cada categoria tem contexto sintático próprio</td><td>dá para ter instrumento e padrão com o mesmo nome (pode confundir quem lê)</td></tr>
+          <tr><td>Uso antes da declaração permitido</td><td>análise em duas passadas; gerador ordena</td><td>nenhum relevante</td></tr>
+          <tr><td>Modificadores só dentro de <code>[ ]</code></td><td>segue a gramática da especificação, onde <code>padrao</code> é sempre entre colchetes</td><td>o usuário escreve <code>.rapido(2)</code> ou <code>[[...]*2]</code></td></tr>
+          <tr><td><code>.transpor</code> em faixa de <code>bateria</code> é erro</td><td>não tem significado musical; foi além da especificação</td><td>—</td></tr>
+          <tr><td>Erros semânticos coletados; léxicos e sintáticos param no primeiro</td><td>a AST completa permite continuar; sem AST não dá</td><td>sem recuperação de erro sintático</td></tr>
+          <tr><td>Sem elongação (<code>@</code> ou <code>_</code>)</td><td>fora do escopo da especificação</td><td>uma nota não pode durar 3 de 4 passos</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- ===================================================== 13 -->
+  <section class="cap" id="perguntas">
+    <div class="prose">
+      <div class="cap-head"><span class="num">13</span><h2>Perguntas do professor</h2></div>
+      <p>Tente responder em voz alta antes de abrir cada uma.</p>
+
+      <details class="qa"><summary>Por que traduzir para Python em vez de interpretar a AST?</summary><div class="ans">
+        <p>Porque o trabalho pede um compilador/transpilador. Gerar código separa a <strong>análise</strong> (que garante que o programa está correto) da <strong>execução</strong> (que fica a cargo do Python e do runtime). O código gerado também é inspecionável com <code>--emitir</code> e roda sozinho, porque é autocontido.</p></div></details>
+
+      <details class="qa"><summary>O que é o one-step pipeline e como você o cumpre?</summary><div class="ans">
+        <p>Um único comando compila e executa. <code>main.py</code> gera o Python como string, chama <code>compile()</code> e <code>exec()</code> em memória. O usuário nunca vê nem edita o Python, e nenhum arquivo intermediário é criado.</p></div></details>
+
+      <details class="qa"><summary>Por que Lark? Por que LALR e não Earley?</summary><div class="ans">
+        <p>O Lark permite que a gramática seja um arquivo separado, o próprio entregável <code>gramatica.lark</code>, e gera o parser a partir dele. Escolhi LALR(1) porque a gramática é determinística (o Lark verificaria conflitos ao construir a tabela), porque é linear e porque permite o lexer contextual. O Earley aceitaria gramáticas ambíguas, o que esconderia erros de projeto da gramática.</p></div></details>
+
+      <details class="qa"><summary>Onde está a precedência na sua gramática?</summary><div class="ans">
+        <p>Na estratificação das regras: <code>camadas</code> contém <code>sequencia</code>, que contém <code>passo</code>, que contém <code>atomo</code>. A vírgula está no nível mais externo e liga mais fraco; os pós-fixos estão no mais interno e ligam mais forte. É a mesma técnica de <code>expr/termo/fator</code>. <code>[bd sd*2, hh]</code> = <code>((bd (sd*2)), hh)</code>.</p></div></details>
+
+      <details class="qa"><summary>E a associatividade?</summary><div class="ans">
+        <p>Modificadores: <code>atomo modificador*</code> lê da esquerda para a direita, e o Transformer, no método <code>passo</code>, envolve cada nó no próximo, o que dá associatividade à esquerda (<code>bd*2/3</code> = <code>(bd*2)/3</code>). Transformações: o gerador dobra à esquerda, então <code>.a().b()</code> vira <code>b(a(p))</code>.</p></div></details>
+
+      <details class="qa"><summary>Como o lexer sabe que <code>bd</code> não é identificador e que <code>c4e4</code> não é duas notas?</summary><div class="ans">
+        <p><code>bd</code>: o terminal SOM tem prioridade 3, maior que o ID. <code>c4e4</code>: o regex da NOTA tem um lookahead negativo <code>(?![A-Za-z0-9_#])</code>, então só casa se a palavra terminar logo depois do dígito. Assim <code>c4e4</code> inteiro vira ID, e o parser dá erro com a dica de separar os passos com espaços.</p></div></details>
+
+      <details class="qa"><summary>Se o lexer é contextual, como você impede <code>padrao tocar = [...]</code>?</summary><div class="ans">
+        <p>Naquele estado, o lexer contextual só tenta os tokens aceitos, e ID é o único, então <code>tocar</code> viraria ID. Por isso o Transformer passa todo identificador por <code>_id()</code>, que rejeita palavras reservadas, sons e notas com um erro sintático na posição certa. Isso garante a regra da especificação de que as reservadas têm prioridade sobre ID.</p></div></details>
+
+      <details class="qa"><summary>Qual a diferença entre a árvore de derivação e a AST?</summary><div class="ans">
+        <p>A árvore de derivação (concreta) tem um nó para cada regra usada e guarda os tokens. A AST guarda só a estrutura com significado: os nós <code>passo</code> e <code>padrao</code> somem, <code>[ ]</code> vira a própria <code>Camadas</code>, a fonte vira um objeto com campos tipados e cada nó guarda sua posição para as mensagens de erro. Dá para mostrar as duas com <code>--mostrar-arvore</code> e <code>--mostrar-ast</code>.</p></div></details>
+
+      <details class="qa"><summary>Por que essas verificações são semânticas e não estão na gramática?</summary><div class="ans">
+        <p>Porque dependem de contexto ou de valores, e uma gramática livre de contexto não guarda contexto. "O instrumento foi declarado" exige lembrar declarações anteriores (tabela de símbolos). "Volume ≤ 1" é sobre o valor do número, não sobre a forma. "Faixa de som com notas" depende do tipo inferido do padrão, que pode estar declarado em outro lugar.</p></div></details>
+
+      <details class="qa"><summary>Como funciona sua tabela de símbolos?</summary><div class="ans">
+        <p>São três dicionários (instrumentos, padrões e faixas) de nome para informação: o nó da declaração, os atributos resolvidos (onda, volume, tipo do padrão) e uma flag <code>usado</code> para os avisos. Ela é preenchida na primeira passada e consultada na segunda. O gerador também a usa, para pegar a onda e o volume já resolvidos com os valores padrão.</p></div></details>
+
+      <details class="qa"><summary>Como você infere o tipo de um padrão?</summary><div class="ans">
+        <p>Percorro a subárvore e coleto as folhas (<code>Nota</code> e <code>Som</code>). Se todas são do mesmo tipo, esse é o tipo do padrão. Se aparece uma diferente, é erro, apontado para a folha intrusa. Só pausas dá tipo neutro (<code>None</code>), compatível com os dois tipos de faixa. Para padrão nomeado, o tipo é guardado na tabela e comparado com <code>nota</code>/<code>som</code> no ponto de uso.</p></div></details>
+
+      <details class="qa"><summary>Por que o código gerado chama funções em vez de listar as notas?</summary><div class="ans">
+        <p>Para que a tradução preserve a estrutura do programa. Cada nó da AST vira uma chamada de combinador, e dá para apontar a correspondência no <code>--emitir</code>. Pré-calcular transformaria o compilador num gerador de dados, e a semântica das construções (alternância, aceleração) ficaria escondida dentro do compilador.</p></div></details>
+
+      <details class="qa"><summary>Explique por que <code>seq</code> é <code>rapido(n, alterna(...))</code>.</summary><div class="ans">
+        <p>A alternância põe cada filho num ciclo inteiro: filho 0 no ciclo 0, filho 1 no ciclo 1… Acelerando n vezes, esses n ciclos cabem em um, e cada filho fica com 1/n. A vantagem é que alternâncias aninhadas dentro de sequências recebem a contagem de ciclos correta de graça. É exatamente como o Tidal define <code>fastcat</code>.</p></div></details>
+
+      <details class="qa"><summary>Como <code>&lt;a &lt;b c&gt;&gt;</code> toca "a b a c"?</summary><div class="ans">
+        <p>Pelo deslocamento: no ciclo c, o filho <code>c % n</code> é consultado como se estivesse no seu próprio ciclo <code>c // n</code>. O <code>&lt;b c&gt;</code> só é chamado nos ciclos 1 e 3 do pai, que para ele são 0 e 1, então alterna entre b e c.</p></div></details>
+
+      <details class="qa"><summary>Por que usar <code>Fraction</code>?</summary><div class="ans">
+        <p>Porque as subdivisões geram terços, quintos e sétimos, que não são exatos em ponto flutuante. Com frações, tempos que deveriam coincidir coincidem exatamente, mesmo depois de muitos ciclos e aninhamentos. A conversão para <code>float</code> só acontece na síntese.</p></div></details>
+
+      <details class="qa"><summary>O que acontece com <code>[a b c d] .lento(2)</code>?</summary><div class="ans">
+        <p><code>lento(2, p)</code> = <code>rapido(1/2, p)</code>. A consulta de [0, 1) vira uma consulta de p em [0, ½), que pega a e b, com tempos multiplicados por 2: a em (0, ½), b em (½, 1). No ciclo 1 tocam c e d. O padrão passa a levar 2 ciclos.</p></div></details>
+
+      <details class="qa"><summary>Como você evita estalos e distorção no áudio?</summary><div class="ans">
+        <p>Estalos: envelope de 5 ms de ataque e 50 ms de release, para a onda começar e terminar em zero. Distorção: a mixagem é normalizada para pico 0,9 se passar disso, o que evita clipping no WAV de 16 bits.</p></div></details>
+
+      <details class="qa"><summary>Como você testou?</summary><div class="ans">
+        <p>Com 71 testes pytest, divididos por fase: combinadores com tempos exatos, parser (precedência e erros com posição), semântica (um arquivo de exemplo por erro, cada um com a mensagem esperada) e gerador (código esperado, mais a execução do script autocontido verificando o WAV).</p></div></details>
+
+      <details class="qa"><summary>Como você adicionaria uma transformação nova, por exemplo <code>.eco(n)</code>?</summary><div class="ans">
+        <p>A gramática não muda, porque <code>transformacao</code> já aceita qualquer ID com zero ou um argumento. Seriam três passos: (1) no semântico, adicionar <code>"eco": 1</code> ao dicionário <code>TRANSFORMACOES</code>, mais a validação do argumento; (2) no runtime, criar o combinador <code>eco(n, p)</code>, por exemplo empilhando <code>p</code> com cópias atrasadas e mais baixas; (3) no gerador, nada, porque <code>expr_transformacao</code> já gera <code>nome(arg, P)</code> genericamente. É uma boa resposta para mostrar que você entende a separação de fases.</p></div></details>
+
+      <details class="qa"><summary>E se quisesse elongação, tipo <code>a@3 b</code> (a dura 3/4)?</summary><div class="ans">
+        <p>Aí a gramática muda. Seria preciso: (1) adicionar <code>"@" NUMERO</code> como alternativa de <code>modificador</code>; (2) criar o nó <code>Peso(n, alvo)</code> no Transformer; (3) validar no semântico que o peso é maior que 0; (4) no gerador, quando a sequência tiver pesos, emitir um combinador <code>seq_pesos((3, A), (1, B))</code>; (5) no runtime, implementar esse combinador, que divide o ciclo proporcionalmente aos pesos (o <code>timecat</code> do Tidal).</p></div></details>
+
+      <details class="qa"><summary>Quais são as limitações?</summary><div class="ans">
+        <p>Consulta só pelo início do evento, sem fragmentos; não há elongação de notas; erros sintáticos param no primeiro, sem recuperação; síntese simples, sem filtros nem efeitos (que estão fora do escopo). Veja a tabela da seção 12.</p></div></details>
+    </div>
+  </section>
+
+  <!-- ===================================================== 14 -->
+  <section class="cap" id="exercicios">
+    <div class="prose">
+      <div class="cap-head"><span class="num">14</span><h2>Exercícios</h2></div>
+      <p>Resolva no papel e confira no laboratório (botão "conferir").</p>
+    </div>
+    <div class="ex-list prose">
+      <div class="ex"><p><strong>1.</strong> Em que instantes do ciclo 0 toca <code>sd</code> em <code>[bd [sd sd] ~ sd]</code>?</p>
+        <details><summary>resposta</summary><p>Em ¼, 3/8 e ¾. São 4 passos de ¼. O segundo passo (de ¼ a ½) é o subgrupo <code>[sd sd]</code>, dividido em dois oitavos: ¼ e 3/8. O quarto passo começa em ¾.</p></details>
+        <button class="chip" data-try="[bd [sd sd] ~ sd]">conferir</button></div>
+      <div class="ex"><p><strong>2.</strong> Quais notas tocam nos ciclos 0 a 3 de <code>[c4 &lt;e4 &lt;g4 b4&gt;&gt;]</code>?</p>
+        <details><summary>resposta</summary><p>Ciclo 0: c4 e4 · ciclo 1: c4 g4 · ciclo 2: c4 e4 · ciclo 3: c4 b4.</p></details>
+        <button class="chip" data-try="[c4 &lt;e4 &lt;g4 b4&gt;&gt;]" data-ciclos="4">conferir</button></div>
+      <div class="ex"><p><strong>3.</strong> Que Python o gerador emite para <code>[bd bd sd*2]</code>?</p>
+        <details><summary>resposta</summary><p><code>seq(som("bd"), som("bd"), rapido(2, som("sd")))</code>. Cada passo vira um argumento do <code>seq</code>; o <code>*2</code> vira a chamada <code>rapido</code>.</p></details>
+        <button class="chip" data-try="[bd bd sd*2]">conferir</button></div>
+      <div class="ex"><p><strong>4.</strong> Por que <code>[c4 bd]</code> não compila? Em qual fase falha?</p>
+        <details><summary>resposta</summary><p>Na semântica: o padrão mistura notas e sons de bateria. Sintaticamente ele é válido, já que tanto NOTA quanto SOM são átomos.</p></details>
+        <button class="chip" data-try="[c4 bd]">conferir</button></div>
+      <div class="ex"><p><strong>5.</strong> Quantos eventos <code>[hh*3/2]</code> produz em 2 ciclos? E em que instantes?</p>
+        <details><summary>resposta</summary><p>3 eventos: em 0, 2/3 e 4/3. <code>hh*3</code> dá 3 por ciclo; <code>/2</code> espalha por 2 ciclos, então 1,5 por ciclo, cada um com duração 2/3.</p></details>
+        <button class="chip" data-try="[hh*3/2]">conferir</button></div>
+    </div>
+  </section>
+
+  <!-- ===================================================== 15 -->
+  <section class="cap" id="glossario">
+    <div class="prose">
+      <div class="cap-head"><span class="num">15</span><h2>Glossário</h2></div>
+      <div class="tbl"><table>
+        <tbody>
+          <tr><td><strong>Token / lexema</strong></td><td>Unidade léxica (tipo + texto). O lexema é o texto exato que casou.</td></tr>
+          <tr><td><strong>Terminal / não terminal</strong></td><td>Símbolo que vira token (NOTA, <code>";"</code>) / símbolo definido por regras (<code>camadas</code>, <code>faixa</code>).</td></tr>
+          <tr><td><strong>EBNF</strong></td><td>Notação de gramáticas com repetição <code>{ }</code> e opcional <code>[ ]</code>.</td></tr>
+          <tr><td><strong>LALR(1)</strong></td><td>Parser ascendente (shift/reduce) guiado por tabela, com 1 token de lookahead.</td></tr>
+          <tr><td><strong>Conflito shift/reduce</strong></td><td>Ponto em que a tabela não sabe se empilha ou reduz: sinal de gramática ambígua ou não LALR.</td></tr>
+          <tr><td><strong>Lexer contextual</strong></td><td>Lexer que só tenta os terminais aceitos no estado atual do parser.</td></tr>
+          <tr><td><strong>Árvore de derivação</strong></td><td>Árvore concreta, um nó por regra aplicada.</td></tr>
+          <tr><td><strong>AST</strong></td><td>Árvore sintática abstrata: só a estrutura com significado, com nós tipados.</td></tr>
+          <tr><td><strong>Tabela de símbolos</strong></td><td>Mapa de nomes declarados para suas informações (tipo, atributos, uso).</td></tr>
+          <tr><td><strong>Tradução dirigida pela sintaxe</strong></td><td>Cada construção da gramática tem uma regra de tradução. O resultado de um nó é montado a partir do resultado dos filhos.</td></tr>
+          <tr><td><strong>Transpilador</strong></td><td>Compilador cuja saída é outra linguagem de alto nível (aqui, Python).</td></tr>
+          <tr><td><strong>Combinador</strong></td><td>Função que recebe padrões e devolve um padrão (<code>seq</code>, <code>stack</code>, <code>rapido</code>…).</td></tr>
+          <tr><td><strong>Ciclo</strong></td><td>Unidade de tempo da linguagem: um compasso de 4 tempos, ou <code>240/bpm</code> segundos.</td></tr>
+          <tr><td><strong>Evento</strong></td><td>(início, fim, valor) em ciclos, com <code>Fraction</code>.</td></tr>
+          <tr><td><strong>Envelope</strong></td><td>Curva de amplitude ao longo da nota (ataque, release).</td></tr>
+          <tr><td><strong>Clipping</strong></td><td>Amostra além do máximo representável, que distorce o som.</td></tr>
+        </tbody>
+      </table></div>
+      <p class="small">Este guia descreve o código em <code>~/dsl-musical</code> como está hoje. Se você mudar o compilador, atualize as partes afetadas.</p>
+    </div>
+  </section>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ------------------------------------------------------------------
+   * Realce simples de sintaxe para os blocos de código (py, ritmo, lark, ebnf, sh)
+   * ------------------------------------------------------------------ */
+  const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const KW = {
+    py: /\b(def|class|return|if|elif|else|for|in|while|import|from|as|with|try|except|raise|lambda|None|True|False|and|or|not|is|pass|break|continue|global|yield)\b/,
+    ritmo: /\b(tempo|instrumento|onda|volume|padrao|faixa|nota|bateria|com|tocar|ciclos|salvar)\b/,
+    lark: /(%import|%ignore)\b/,
+    ebnf: /$^/,
+    sh: /$^/
+  };
+  function realcar(code, lang) {
+    const kw = KW[lang] || KW.py;
+    const com = lang === "py" || lang === "sh" ? /#[^\n]*/ : lang === "ebnf" ? /\(\*[\s\S]*?\*\)/ : /\/\/[^\n]*/;
+    const parts = [
+      ["com", com.source],
+      ["str", /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/.source],
+      ["kw", kw.source],
+      ["fn", lang === "py" ? /\b[A-Za-z_]\w*(?=\()/.source : "$^"],
+      ["num", /\b\d+(?:\.\d+)?\b/.source]
+    ];
+    // grupos internos viram não capturantes, para o índice do grupo externo identificar a categoria
+    const semCaptura = s => s.replace(/(^|[^\\])\((?!\?)/g, "$1(?:");
+    const re = new RegExp(parts.map(p => "(" + semCaptura(p[1]) + ")").join("|"), "g");
+    let out = "", last = 0, m;
+    while ((m = re.exec(code))) {
+      if (m[0] === "") { re.lastIndex++; continue; }
+      out += esc(code.slice(last, m.index));
+      const idx = m.slice(1).findIndex(x => x !== undefined);
+      out += '<span class="hl-' + parts[idx][0] + '">' + esc(m[0]) + "</span>";
+      last = m.index + m[0].length;
+    }
+    return out + esc(code.slice(last));
+  }
+  document.querySelectorAll("pre code[data-lang]").forEach(el => {
+    el.innerHTML = realcar(el.textContent, el.dataset.lang);
+  });
+
+  /* ------------------------------------------------------------------
+   * Frações exatas (como fractions.Fraction)
+   * ------------------------------------------------------------------ */
+  const gcd = (a, b) => { a = Math.abs(a); b = Math.abs(b); while (b) { [a, b] = [b, a % b]; } return a || 1; };
+  class Fr {
+    constructor(n, d = 1) { if (d < 0) { n = -n; d = -d; } const g = gcd(n, d); this.n = n / g; this.d = d / g; }
+    static of(x) { return x instanceof Fr ? x : Fr.parse(String(x)); }
+    static parse(s) {
+      if (s.includes(".")) { const f = s.split(".")[1].length; const d = Math.pow(10, f); return new Fr(Math.round(parseFloat(s) * d), d); }
+      return new Fr(parseInt(s, 10), 1);
+    }
+    add(o) { o = Fr.of(o); return new Fr(this.n * o.d + o.n * this.d, this.d * o.d); }
+    sub(o) { o = Fr.of(o); return new Fr(this.n * o.d - o.n * this.d, this.d * o.d); }
+    mul(o) { o = Fr.of(o); return new Fr(this.n * o.n, this.d * o.d); }
+    div(o) { o = Fr.of(o); return new Fr(this.n * o.d, this.d * o.n); }
+    cmp(o) { o = Fr.of(o); return this.n * o.d - o.n * this.d; }
+    lt(o) { return this.cmp(o) < 0; }
+    le(o) { return this.cmp(o) <= 0; }
+    floor() { return Math.floor(this.n / this.d); }
+    ceil() { return Math.ceil(this.n / this.d); }
+    val() { return this.n / this.d; }
+    toString() { return this.d === 1 ? String(this.n) : this.n + "/" + this.d; }
+  }
+  const maxF = (a, b) => (a.lt(b) ? b : a);
+  const minF = (a, b) => (a.lt(b) ? a : b);
+
+  /* ------------------------------------------------------------------
+   * Runtime de padrões (espelho de runtime/padroes.py)
+   * Um padrão é uma função consulta(a, b) -> [{s, e, v}]
+   * ------------------------------------------------------------------ */
+  const ciclos = (a, b) => { const r = []; for (let c = a.floor(); c < b.ceil(); c++) r.push(c); return r; };
+  const pure = v => (a, b) => ciclos(a, b).filter(c => a.le(c) && new Fr(c).lt(b)).map(c => ({ s: new Fr(c), e: new Fr(c + 1), v }));
+  const silencio = () => () => [];
+  const rapido = (n, p) => { n = Fr.of(n); return (a, b) => p(a.mul(n), b.mul(n)).map(e => ({ s: e.s.div(n), e: e.e.div(n), v: e.v })); };
+  const lento = (n, p) => rapido(new Fr(1).div(Fr.of(n)), p);
+  const alterna = (...ps) => {
+    const n = ps.length;
+    return (a, b) => {
+      const out = [];
+      for (const c of ciclos(a, b)) {
+        const filho = ps[((c % n) + n) % n];
+        const desloc = new Fr(c - Math.floor(c / n));
+        const ini = maxF(a, new Fr(c)), fim = minF(b, new Fr(c + 1));
+        for (const e of filho(ini.sub(desloc), fim.sub(desloc))) out.push({ s: e.s.add(desloc), e: e.e.add(desloc), v: e.v });
+      }
+      return out;
+    };
+  };
+  const seq = (...ps) => rapido(ps.length, alterna(...ps));
+  const stack = (...ps) => (a, b) => ps.flatMap(p => p(a, b));
+  const reverso = p => (a, b) => {
+    const out = [];
+    for (const c of ciclos(a, b)) {
+      const eixo = new Fr(2 * c + 1);
+      for (const e of p(new Fr(c), new Fr(c + 1))) {
+        const fim = minF(e.e, new Fr(c + 1));
+        const novo = { s: eixo.sub(fim), e: eixo.sub(e.s), v: e.v };
+        if (a.le(novo.s) && novo.s.lt(b)) out.push(novo);
+      }
+    }
+    return out;
+  };
+  const fmap = (f, p) => (a, b) => p(a, b).map(e => ({ s: e.s, e: e.e, v: f(e.v) }));
+  const transpor = (n, p) => fmap(v => (v.tipo === "nota" ? Object.assign({}, v, { midi: v.midi + n }) : v), p);
+  const SEMI = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
+  function midi(nome) {
+    let s = SEMI[nome[0]], r = nome.slice(1);
+    if (r[0] === "#") { s++; r = r.slice(1); } else if (r[0] === "b") { s--; r = r.slice(1); }
+    return 12 * (parseInt(r, 10) + 1) + s;
+  }
+
+  /* ------------------------------------------------------------------
+   * Fase 1: léxico da mini-notação (mesmos regex do gramatica.lark)
+   * ------------------------------------------------------------------ */
+  function erro(fase, msg, pos, len) { return { fase, msg, pos, len: len || 1 }; }
+  const SIMB = { "[": "LSQB", "]": "RSQB", "<": "LESSTHAN", ">": "MORETHAN", ",": "COMMA", "*": "STAR", "/": "SLASH", "(": "LPAR", ")": "RPAR", "~": "TILDE" };
+  const LEX = [
+    ["NOTA", /[a-g](#|b)?[0-9](?![A-Za-z0-9_#])/y],
+    ["SOM", /(bd|sd|hh|oh|cp)(?![A-Za-z0-9_])/y],
+    ["NUMERO", /-?[0-9]+(\.[0-9]+)?/y],
+    ["ID", /[a-zA-Z_][a-zA-Z0-9_]*/y]
+  ];
+  function lex(src) {
+    const toks = []; let i = 0;
+    while (i < src.length) {
+      const ch = src[i];
+      if (/\s/.test(ch)) { i++; continue; }
+      let m = null, tipo = null;
+      for (const [t, re] of LEX) { re.lastIndex = i; const r = re.exec(src); if (r) { m = r[0]; tipo = t; break; } }
+      if (!m && SIMB[ch]) { m = ch; tipo = SIMB[ch]; }
+      if (!m) throw erro("léxico", "caractere inesperado '" + ch + "'", i);
+      toks.push({ tipo, txt: m, pos: i }); i += m.length;
+    }
+    toks.push({ tipo: "$END", txt: "", pos: src.length });
+    return toks;
+  }
+
+  /* ------------------------------------------------------------------
+   * Fase 2+3: parser descendente recursivo -> AST (mesma gramática)
+   * ------------------------------------------------------------------ */
+  const NOME_TOK = { NOTA: "nota", SOM: "som", NUMERO: "número", ID: "identificador", $END: "fim" };
+  const INICIO_ATOMO = ["NOTA", "SOM", "TILDE", "LSQB", "LESSTHAN"];
+  function parse(toks) {
+    let k = 0;
+    const peek = () => toks[k], next = () => toks[k++];
+    const inesperado = (t, esperados) => {
+      const desc = t.tipo === "$END" ? "fim da entrada" : "'" + t.txt + "'" + (NOME_TOK[t.tipo] ? " (" + NOME_TOK[t.tipo] + ")" : "");
+      let msg = "token inesperado " + desc + "; esperado: " + esperados.join(", ");
+      if (t.tipo === "ID") msg += "\n(dica: só notas, sons, '~', '[ ]' e '< >'; separe os passos com espaços)";
+      return erro("sintático", msg, t.pos, Math.max(1, t.txt.length));
+    };
+    const expect = (tipo, desc) => { const t = peek(); if (t.tipo !== tipo) throw inesperado(t, [desc]); return next(); };
+    const num = () => expect("NUMERO", "número");
+
+    function padrao() {
+      expect("LSQB", "'['");
+      const p = camadas();
+      expect("RSQB", "']'");
+      if (peek().tipo !== "$END") throw inesperado(peek(), ["fim (modificadores só valem dentro de [ ])"]);
+      return p;
+    }
+    function camadas() {
+      const f = [sequencia()];
+      while (peek().tipo === "COMMA") { next(); f.push(sequencia()); }
+      return { t: "Camadas", filhos: f };
+    }
+    function sequencia() {
+      const f = [passo()];
+      while (INICIO_ATOMO.includes(peek().tipo)) f.push(passo());
+      return { t: "Sequencia", filhos: f };
+    }
+    function passo() {
+      let no = atomo();
+      for (;;) {
+        const t = peek();
+        if (t.tipo === "STAR") { next(); no = { t: "Rapido", n: num(), filhos: [no], pos: t.pos }; }
+        else if (t.tipo === "SLASH") { next(); no = { t: "Lento", n: num(), filhos: [no], pos: t.pos }; }
+        else break;
+      }
+      return no;
+    }
+    function atomo() {
+      const t = peek();
+      switch (t.tipo) {
+        case "NOTA": next(); return { t: "Nota", txt: t.txt, midi: midi(t.txt), pos: t.pos, len: t.txt.length };
+        case "SOM": next(); return { t: "Som", txt: t.txt, pos: t.pos, len: t.txt.length };
+        case "TILDE": next(); return { t: "Pausa" };
+        case "LSQB": { next(); const p = camadas(); expect("RSQB", "']'"); return p; }
+        case "LESSTHAN": { next(); const s = sequencia(); expect("MORETHAN", "'>'"); return { t: "Alterna", filhos: s.filhos }; }
+        default: throw inesperado(t, ["nota", "som", "'~'", "'['", "'<'"]);
+      }
+    }
+    return padrao();
+  }
+
+  /* ------------------------------------------------------------------
+   * Fase 4: verificações semânticas da mini-notação
+   * ------------------------------------------------------------------ */
+  function verificar(raiz) {
+    const erros = [], folhas = [];
+    (function andar(no) {
+      if (no.t === "Nota" || no.t === "Som") { folhas.push(no); return; }
+      const v = no.n ? parseFloat(no.n.txt) : null;
+      if ((no.t === "Rapido" || no.t === "Lento") && v <= 0) erros.push(erro("semântico", "'" + (no.t === "Rapido" ? "*" : "/") + no.n.txt + "': o fator deve ser > 0", no.n.pos, no.n.txt.length));
+      (no.filhos || []).forEach(andar);
+    })(raiz);
+    if (folhas.length) {
+      const t0 = folhas[0].t;
+      const intrusa = folhas.find(f => f.t !== t0);
+      if (intrusa) erros.push(erro("semântico", "padrão mistura " + (t0 === "Nota" ? "notas e sons de bateria" : "sons de bateria e notas") + ": '" + intrusa.txt + "'", intrusa.pos, intrusa.len));
+    }
+    return erros.sort((a, b) => a.pos - b.pos);   // como ErrosSemanticos: ordenados por posição
+  }
+
+  /* ------------------------------------------------------------------
+   * Fase 5: gerador (mesmas regras do gerador.py) e avaliação
+   * ------------------------------------------------------------------ */
+  function expandir(filhos, fn) {
+    const out = [];
+    for (const f of filhos) {
+      out.push(fn(f));
+    }
+    return out;
+  }
+  function gerar(no) {
+    switch (no.t) {
+      case "Nota": return 'nota("' + no.txt + '")';
+      case "Som": return 'som("' + no.txt + '")';
+      case "Pausa": return "silencio()";
+      case "Sequencia": { const p = expandir(no.filhos, gerar); return p.length === 1 ? p[0] : "seq(" + p.join(", ") + ")"; }
+      case "Camadas": { const p = no.filhos.map(gerar); return p.length === 1 ? p[0] : "stack(" + p.join(", ") + ")"; }
+      case "Alterna": return "alterna(" + expandir(no.filhos, gerar).join(", ") + ")";
+      case "Rapido": return "rapido(" + no.n.txt + ", " + gerar(no.filhos[0]) + ")";
+      case "Lento": return "lento(" + no.n.txt + ", " + gerar(no.filhos[0]) + ")";
+    }
+  }
+  function avaliar(no) {
+    switch (no.t) {
+      case "Nota": return pure({ tipo: "nota", nome: no.txt, midi: no.midi });
+      case "Som": return pure({ tipo: "som", nome: no.txt });
+      case "Pausa": return silencio();
+      case "Sequencia": { const p = expandir(no.filhos, avaliar); return p.length === 1 ? p[0] : seq(...p); }
+      case "Camadas": { const p = no.filhos.map(avaliar); return p.length === 1 ? p[0] : stack(...p); }
+      case "Alterna": return alterna(...expandir(no.filhos, avaliar));
+      case "Rapido": return rapido(no.n.txt, avaliar(no.filhos[0]));
+      case "Lento": return lento(no.n.txt, avaliar(no.filhos[0]));
+    }
+  }
+  function rotulo(no) {
+    switch (no.t) {
+      case "Nota": return "Nota " + no.txt + " (midi " + no.midi + ")";
+      case "Som": return "Som " + no.txt;
+      case "Pausa": return "Pausa ~";
+      case "Alterna": return "Alterna < >";
+      case "Rapido": return "Rapido *" + no.n.txt;
+      case "Lento": return "Lento /" + no.n.txt;
+      default: return no.t;
+    }
+  }
+  function arvore(no) {
+    const linhas = [rotulo(no)];
+    (function vis(n, pre) {
+      const f = n.filhos || [];
+      f.forEach((c, i) => {
+        const ult = i === f.length - 1;
+        linhas.push(pre + (ult ? "└── " : "├── ") + rotulo(c));
+        vis(c, pre + (ult ? "    " : "│   "));
+      });
+    })(no, "");
+    return linhas.join("\n");
+  }
+
+  /* ------------------------------------------------------------------
+   * Interface
+   * ------------------------------------------------------------------ */
+  const $ = id => document.getElementById(id);
+  const inp = $("lab-in"), selC = $("lab-ciclos"), selT = $("lab-trans");
+  const PRESETS = [
+    ["precedência", "[bd sd*2, hh]"],
+    ["subgrupo + alternância", "[c4 e4 [g4 a4] <b4 c5>]"],
+    ["alternância aninhada", "[<bd <sd cp>>]"],
+    ["groove da demo", "[bd ~ sd ~, hh*8]"],
+    ["lento", "[[c4 e4 g4 b4]/2]"],
+    ["acordes", "[<c4 a3 f3 g3>, <e4 c4 a3 b3>, <g4 e4 c4 d4>]"],
+    ["melodia em 4 compassos", "[<[c5 ~ e5 g5] [a5 g5 e5 ~] [f5 e5 d5 c5] [d5 ~ ~ ~]>]"],
+    ["erro léxico", "[bd $ sd]"],
+    ["erro sintático", "[c4e4 g4]"],
+    ["erro semântico", "[c4 bd*0]"]
+  ];
+  const pres = $("lab-presets");
+  PRESETS.forEach(([nome, txt]) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.textContent = nome; b.title = txt;
+    b.addEventListener("click", () => { inp.value = txt; atualizar(); });
+    pres.appendChild(b);
+  });
+  document.querySelectorAll("[data-try]").forEach(b => b.addEventListener("click", () => {
+    inp.value = b.dataset.try;
+    if (b.dataset.ciclos) selC.value = b.dataset.ciclos;
+    atualizar();
+    $("lab").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }));
+
+  let padraoAtual = null;
+
+  function mostrarErro(src, e) {
+    const box = $("lab-err");
+    box.hidden = false;
+    box.textContent = "erro " + e.fase + " [coluna " + (e.pos + 1) + "]: " + e.msg + "\n  " + src + "\n  " + " ".repeat(e.pos) + "^".repeat(e.len);
+  }
+
+  function atualizar() {
+    const src = inp.value;
+    $("lab-err").hidden = true;
+    padraoAtual = null;
+    let toks = [];
+    try { toks = lex(src); } catch (e) { mostrarErro(src, e); limpar("—"); $("lab-toks").textContent = "(falhou na análise léxica)"; return; }
+    $("lab-toks").innerHTML = toks.filter(t => t.tipo !== "$END").map(t => '<span class="tok"><b>' + esc(t.tipo) + "</b>" + esc(t.txt) + "</span>").join("");
+    let ast;
+    try { ast = parse(toks); } catch (e) { mostrarErro(src, e); limpar("(falhou na análise sintática)"); return; }
+    $("lab-ast").textContent = arvore(ast);
+    const errs = verificar(ast);
+    if (errs.length) {
+      mostrarErro(src, errs[0]);
+      $("lab-py").textContent = "(compilação interrompida: " + errs.length + " erro(s) semântico(s))";
+      $("lab-evs").textContent = "—"; desenhar([], 1); $("lab-sum").textContent = "";
+      return;
+    }
+    let py = gerar(ast);
+    let pat = avaliar(ast);
+    const tr = selT.value;
+    if (tr === "reverso") { py = "reverso(" + py + ")"; pat = reverso(pat); }
+    if (tr === "lento2") { py = "lento(2, " + py + ")"; pat = lento(2, pat); }
+    if (tr === "rapido2") { py = "rapido(2, " + py + ")"; pat = rapido(2, pat); }
+    if (tr === "transpor12") { py = "transpor(12, " + py + ")"; pat = transpor(12, pat); }
+    $("lab-py").innerHTML = realcar("f_lab = " + py, "py");
+    padraoAtual = pat;
+    const N = parseInt(selC.value, 10);
+    const evs = pat(new Fr(0), new Fr(N)).sort((x, y) => x.s.cmp(y.s) || x.e.cmp(y.e));
+    $("lab-evs").textContent = evs.slice(0, 64).map(e => "(" + e.s + ", " + e.e + ", " + e.v.nome + (e.v.tipo === "nota" ? "/" + e.v.midi : "") + ")").join("\n") + (evs.length > 64 ? "\n… +" + (evs.length - 64) : "");
+    $("lab-sum").textContent = evs.length + " eventos em " + N + " ciclo(s). Linhas verticais finas = tempos; grossas = início de ciclo.";
+    desenhar(evs, N);
+  }
+  function limpar(msgAst) {
+    $("lab-ast").textContent = msgAst; $("lab-py").textContent = "—"; $("lab-evs").textContent = "—";
+    $("lab-sum").textContent = ""; desenhar([], 1);
+  }
+
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  function desenhar(evs, N) {
+    const svg = $("lab-svg");
+    const chaves = [...new Set(evs.map(e => e.v.tipo === "nota" ? "n" + String(200 - e.v.midi).padStart(3, "0") + e.v.nome + "/" + e.v.midi : "s" + e.v.nome))].sort();
+    const rotulos = chaves.map(k => k.startsWith("n") ? k.slice(4).split("/")[0] : k.slice(1));
+    const L = 56, W = 1000, rowH = 22, top = 22;
+    const H = top + Math.max(1, chaves.length) * rowH + 8;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    const x = t => L + (t / N) * (W - L - 8);
+    let s = "";
+    const ink = css("--ink"), muted = css("--muted"), line = css("--line"), ac = css("--accent"), ac2 = css("--accent2");
+    for (let c = 0; c <= N * 4; c++) {
+      const xx = x(c / 4), grosso = c % 4 === 0;
+      s += '<line x1="' + xx + '" x2="' + xx + '" y1="' + (top - 6) + '" y2="' + (H - 4) + '" stroke="' + (grosso ? muted : line) + '" stroke-width="' + (grosso ? 1.2 : 0.8) + '"/>';
+      if (grosso && c < N * 4) s += '<text x="' + (xx + 4) + '" y="12" font-size="11" fill="' + muted + '" font-family="JetBrains Mono, monospace">ciclo ' + (c / 4) + "</text>";
+    }
+    rotulos.forEach((r, i) => {
+      s += '<text x="' + (L - 8) + '" y="' + (top + i * rowH + 15) + '" font-size="12" text-anchor="end" fill="' + ink + '" font-family="JetBrains Mono, monospace">' + esc(r) + "</text>";
+    });
+    evs.forEach(e => {
+      const k = e.v.tipo === "nota" ? "n" + String(200 - e.v.midi).padStart(3, "0") + e.v.nome + "/" + e.v.midi : "s" + e.v.nome;
+      const i = chaves.indexOf(k);
+      const x0 = x(e.s.val()), x1 = Math.max(x0 + 3, x(Math.min(e.e.val(), N)) - 1.5);
+      s += '<rect x="' + x0 + '" y="' + (top + i * rowH + 3) + '" width="' + (x1 - x0) + '" height="' + (rowH - 6) + '" rx="3" fill="' + (e.v.tipo === "nota" ? ac2 : ac) + '" fill-opacity="0.85"><title>' + esc(e.v.nome + "  " + e.s + " → " + e.e) + "</title></rect>";
+    });
+    if (!evs.length) s += '<text x="' + (L + 6) + '" y="' + (top + 15) + '" font-size="12" fill="' + muted + '">(nenhum evento)</text>';
+    svg.innerHTML = s;
+  }
+
+  /* ------------------------------------------------------------------
+   * Áudio (Web Audio) — síntese simplificada
+   * ------------------------------------------------------------------ */
+  let ctx = null, ruido = null;
+  function garantirCtx() {
+    if (!ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      ctx = new AC();
+      const len = ctx.sampleRate;
+      ruido = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = ruido.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    }
+    return ctx;
+  }
+  function env(g, t, pico, ataque, dur) {
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(pico, t + ataque);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+  }
+  function tocarNota(dest, t, dur, m, onda) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = onda; o.frequency.value = 440 * Math.pow(2, (m - 69) / 12);
+    const fim = t + Math.max(0.03, dur);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.22, t + 0.005);
+    g.gain.setValueAtTime(0.22, Math.max(t + 0.006, fim - 0.05));
+    g.gain.linearRampToValueAtTime(0, fim);
+    o.connect(g).connect(dest); o.start(t); o.stop(fim + 0.01);
+  }
+  function tocarBateria(dest, t, nome) {
+    if (nome === "bd") {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(50, t + 0.12);
+      env(g, t, 0.9, 0.002, 0.4); o.connect(g).connect(dest); o.start(t); o.stop(t + 0.42);
+      return;
+    }
+    const src = ctx.createBufferSource(); src.buffer = ruido;
+    const f = ctx.createBiquadFilter(), g = ctx.createGain();
+    if (nome === "sd") {
+      f.type = "highpass"; f.frequency.value = 1200; env(g, t, 0.5, 0.002, 0.2);
+      const o = ctx.createOscillator(), g2 = ctx.createGain();
+      o.frequency.value = 180; env(g2, t, 0.4, 0.002, 0.15); o.connect(g2).connect(dest); o.start(t); o.stop(t + 0.2);
+    } else if (nome === "hh" || nome === "oh") {
+      f.type = "highpass"; f.frequency.value = 7000; env(g, t, 0.35, 0.001, nome === "hh" ? 0.06 : 0.35);
+    } else {
+      f.type = "bandpass"; f.frequency.value = 1500; f.Q.value = 0.8;
+      g.gain.setValueAtTime(0, t);
+      [0, 0.011, 0.022].forEach(d => { g.gain.setValueAtTime(0.6, t + d); g.gain.exponentialRampToValueAtTime(0.05, t + d + 0.01); });
+      g.gain.exponentialRampToValueAtTime(0.0008, t + 0.25);
+    }
+    src.connect(f).connect(g).connect(dest); src.start(t); src.stop(t + 0.5);
+  }
+  let saida = null;
+  $("lab-play").addEventListener("click", () => {
+    if (!padraoAtual) return;
+    const c = garantirCtx(); if (!c) return;
+    if (c.state === "suspended") c.resume();
+    parar();
+    saida = c.createGain(); saida.gain.value = 0.6;
+    const comp = c.createDynamicsCompressor(); saida.connect(comp).connect(c.destination);
+    const bpm = Math.min(300, Math.max(30, parseFloat($("lab-bpm").value) || 120));
+    const dc = 240 / bpm, N = parseInt(selC.value, 10), t0 = c.currentTime + 0.08;
+    const onda = $("lab-onda").value;
+    for (const e of padraoAtual(new Fr(0), new Fr(N))) {
+      const t = t0 + e.s.val() * dc, dur = (e.e.val() - e.s.val()) * dc;
+      if (e.v.tipo === "nota") tocarNota(saida, t, dur, e.v.midi, onda); else tocarBateria(saida, t, e.v.nome);
+    }
+  });
+  function parar() { if (saida) { try { saida.disconnect(); } catch (_) {} saida = null; } }
+  $("lab-stop").addEventListener("click", parar);
+
+  inp.addEventListener("input", atualizar);
+  selC.addEventListener("change", atualizar);
+  selT.addEventListener("change", atualizar);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", atualizar);
+  new MutationObserver(atualizar).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  atualizar();
+})();
+</script>

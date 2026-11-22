@@ -1,0 +1,3 @@
+tempo 120;
+faixa a: bateria [bd*0 sd/0] .lento(-1) .volume(1.5);
+tocar 2 ciclos;

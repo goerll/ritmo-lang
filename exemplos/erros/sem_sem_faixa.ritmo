@@ -1,0 +1,3 @@
+tempo 120;
+padrao p = [bd sd];
+tocar 2 ciclos;
