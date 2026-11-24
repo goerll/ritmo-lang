@@ -1,0 +1,47 @@
+// Scary Monsters and Nice Sprites (Skrillex) — intro
+// Cover em synth para uso pessoal, transcrito de um MIDI de fã (MIDI Show).
+// Riff de 4 compassos em sol menor, repetido 4x sobre o baixo.
+// A bateria é um acréscimo do arranjo: chimbal entra no 5º compasso,
+// groove no 9º e uma virada de caixa acelerando nos 4 últimos.
+tempo 280;
+
+instrumento lead  { onda serra;    volume 0.35; }
+instrumento grave { onda quadrada; volume 0.3;  }
+
+// lead: um compasso por ciclo, alternando os 4 compassos do riff
+padrao riff = [<
+  [~   g5  f5  g5  bb5 ~   g5  d6 ]
+  [c6  bb5 f5  ~   bb5 a5  f5  eb5]
+  [d5  c5  bb4 f5  bb4 g4  bb4 d5 ]
+  [g6  d6  bb5 g5  f6  bb5 g5  f5 ]
+>];
+
+// baixo: Eb – F – G – G F
+padrao baixo = [<
+  [eb2 [~ [f2 g2]]]
+  f2
+  g2
+  [g2 f2]
+>];
+
+// bateria: cada entrada da alternância é um compasso (16 no total, 4 por linha)
+padrao chimbal = [<
+  ~        ~        ~        ~
+  [~ hh]*4 [~ hh]*4 [~ hh]*4 [~ hh]*4
+  [~ hh]*4 [~ hh]*4 [~ hh]*4 [~ hh]*4
+  [~ hh]*4 [~ hh]*4 [~ hh]*4 [~ hh]*4
+>];
+
+padrao batida = [<
+  ~           ~           ~           ~
+  ~           ~           ~           ~
+  [bd ~ sd ~] [bd ~ sd ~] [bd ~ sd ~] [bd ~ sd ~]
+  [bd sd bd sd] sd*8      sd*8        sd*16
+>];
+
+faixa lead:    riff  com lead;
+faixa baixo:   baixo com grave .transpor(12);
+faixa chimbal: chimbal .volume(0.5);
+faixa batida:  batida  .volume(0.8);
+
+tocar 16 ciclos salvar "scary_monsters_intro.wav";
