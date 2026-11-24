@@ -1,0 +1,4 @@
+tempo 140;
+instrumento lead { onda serra; volume 0.35; }
+faixa lead: [g5 f5 g5 & bb5] com lead;
+tocar 4 ciclos;

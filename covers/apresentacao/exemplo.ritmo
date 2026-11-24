@@ -1,0 +1,6 @@
+tempo 140;
+instrumento lead { onda serra; }
+padrao ritmo = [bd <sd cp> [hh hh]*2];
+faixa batida: ritmo;
+faixa tema: [c4 e4] com lead .transpor(12);
+tocar 4 ciclos;
