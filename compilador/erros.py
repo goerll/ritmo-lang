@@ -67,7 +67,7 @@ def formatar_mensagem(tipo, mensagem, linha, coluna, comprimento, fonte, arquivo
     """Formata no estilo:
 
         demo.ritmo:3:24: erro semântico: instrumento 'xpto' não declarado
-           3 | faixa a: nota [c4] com xpto;
+           3 | faixa a: [c4] com xpto;
              |                        ^^^^
     """
     if linha <= 0:

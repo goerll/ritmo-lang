@@ -13,9 +13,9 @@ instrumento grave { onda serra;    volume 0.7; }
 
 padrao groove = [bd ~ sd ~, hh*8];
 
-faixa percussao: bateria groove;
-faixa baixo:   nota [c2 ~ c2 <eb2 g2>] com grave .lento(2);
-faixa melodia: nota [c4 e4 [g4 a4] <b4 c5>] com lead .transpor(12) .volume(0.6);
+faixa percussao: groove;
+faixa baixo:   [c2 ~ c2 <eb2 g2>] com grave .lento(2);
+faixa melodia: [c4 e4 [g4 a4] <b4 c5>] com lead .transpor(12) .volume(0.6);
 
 tocar 8 ciclos salvar "demo.wav";
 ```
@@ -81,7 +81,7 @@ def_instrumento ::= "instrumento" ID "{" { propriedade ";" } "}"
 propriedade     ::= "onda" ONDA | "volume" NUMERO
 def_padrao      ::= "padrao" ID "=" padrao ";"
 faixa           ::= "faixa" ID ":" fonte { transformacao } ";"
-fonte           ::= ("nota" | "bateria") (padrao | ID) [ "com" ID ]
+fonte           ::= (padrao | ID) [ "com" ID ]      (* tipo inferido do conteúdo *)
 transformacao   ::= "." (ID | "volume") "(" [ NUMERO ] ")"
 tocar           ::= "tocar" NUMERO "ciclos" [ "salvar" STRING ] ";"
 
@@ -105,7 +105,7 @@ atomo           ::= NOTA | SOM | "~" | "[" camadas "]" | "<" sequencia ">"
 | `NUMERO` | `-?[0-9]+(\.[0-9]+)?` |
 | `STRING` | `"[^"\n]*"` |
 | `ID` | `[a-zA-Z_][a-zA-Z0-9_]*`, exceto reservadas, notas e sons |
-| Reservadas | `tempo instrumento onda volume padrao faixa nota bateria com tocar ciclos salvar` |
+| Reservadas | `tempo instrumento onda volume padrao faixa com tocar ciclos salvar` |
 | Comentário | `//` até o fim da linha |
 
 Conflitos léxicos:
@@ -136,6 +136,8 @@ ou use `.rapido(2)`.
 Número (inteiro ou real), nota, som de bateria, pausa `~`, string (nome de arquivo),
 identificador (instrumento, padrão ou faixa) e **padrão** (tipo composto). O padrão tem
 um "tipo de conteúdo": `nota`, `bateria` ou neutro (só pausas). O tipo é inferido pelo semântico.
+A faixa não declara tipo: ele é sempre o do seu padrão (literal ou nomeado, mesmo que declarado
+depois da faixa) e fica gravado em `Fonte.tipo` para as fases seguintes.
 
 ## Análise semântica
 
@@ -143,21 +145,20 @@ Todos os erros são coletados e mostrados juntos, com `arquivo:linha:coluna`, o 
 e, quando cabe, uma dica:
 
 ```
-exemplos/erros/sem_instrumento_nao_declarado.ritmo:2:27: erro semântico: instrumento 'piano' não declarado
- 2 | faixa a: nota [c4 e4] com piano;
-   |                           ^^^^^
+exemplos/erros/sem_instrumento_nao_declarado.ritmo:2:22: erro semântico: instrumento 'piano' não declarado
+ 2 | faixa a: [c4 e4] com piano;
+   |                      ^^^^^
 ```
 
 **Erros:**
 
 - instrumento ou padrão não declarado
 - duplicidade de instrumento, padrão ou faixa (cada categoria tem seu espaço de nomes)
-- `bateria` com notas, ou `nota` com sons de bateria (padrão nomeado é verificado onde é usado)
 - padrão que mistura notas e bateria
-- `com` em faixa de `bateria`
+- `com` em faixa cujo padrão contém sons de bateria
 - transformação desconhecida ou com aridade errada
 - `*0`, `/0`, `rapido`/`lento` ≤ 0, `volume` fora de [0, 1], `tempo` ≤ 0, ciclos ≤ 0 ou não inteiros,
-  `transpor` não inteiro ou aplicado a `bateria`
+  `transpor` não inteiro ou aplicado a padrão de bateria
 - propriedade de instrumento repetida, `tempo` duplicado
 - `tocar` ausente ou repetido, nenhuma faixa
 
@@ -165,7 +166,7 @@ exemplos/erros/sem_instrumento_nao_declarado.ritmo:2:27: erro semântico: instru
 
 - `tempo` ausente (usa 120)
 - instrumento ou padrão nunca usado
-- faixa de `nota` sem `com` (usa senoide, volume 0.8)
+- faixa com notas sem `com` (usa senoide, volume 0.8)
 - instrumento sem `onda`
 - arquivo de saída sem `.wav`
 

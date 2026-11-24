@@ -13,8 +13,8 @@ instrumento grave {
 
 padrao groove = [bd ~ sd ~, hh*8];
 
-faixa percussao: bateria groove;
-faixa baixo:   nota [c2 ~ c2 <eb2 g2>] com grave .lento(2);
-faixa melodia: nota [c4 e4 [g4 a4] <b4 c5>] com lead .transpor(12) .volume(0.6);
+faixa percussao: groove;
+faixa baixo:   [c2 ~ c2 <eb2 g2>] com grave .lento(2);
+faixa melodia: [c4 e4 [g4 a4] <b4 c5>] com lead .transpor(12) .volume(0.6);
 
 tocar 8 ciclos salvar "demo.wav";

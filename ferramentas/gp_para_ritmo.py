@@ -112,7 +112,7 @@ for trk, nomet in enumerate(tracks):
     linhas.append(">];")
     linhas.append("")
 for trk, ident in enumerate(ids):
-    linhas.append(f"faixa {tracks[trk].lower()}: nota {ident} com guitarra{trk + 1};")
+    linhas.append(f"faixa {tracks[trk].lower()}: {ident} com guitarra{trk + 1};")
 linhas += ["", f"tocar {len(mbs)} ciclos salvar \"{slug}.wav\";", ""]
 open(saida, "w").write("\n".join(linhas))
 print("ok", tracks, bpm, len(mbs))

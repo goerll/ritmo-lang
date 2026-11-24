@@ -288,9 +288,9 @@ instrumento grave { onda serra;    volume 0.7; }
 
 padrao groove = [bd ~ sd ~, hh*8];           // padrão nomeado (reutilizável)
 
-faixa percussao: bateria groove;             // faixa de bateria, usando o padrão
-faixa baixo:   nota [c2 ~ c2 &lt;eb2 g2&gt;] com grave .lento(2);
-faixa melodia: nota [c4 e4 [g4 a4] &lt;b4 c5&gt;] com lead .transpor(12) .volume(0.6);
+faixa percussao: groove;                     // faixa de bateria (tipo inferido do padrão)
+faixa baixo:   [c2 ~ c2 &lt;eb2 g2&gt;] com grave .lento(2);
+faixa melodia: [c4 e4 [g4 a4] &lt;b4 c5&gt;] com lead .transpor(12) .volume(0.6);
 
 tocar 8 ciclos salvar "demo.wav";             // comando final</code></pre>
 
@@ -421,8 +421,8 @@ def executar(codigo: str, nome: str):
       <p>O analisador léxico (<em>lexer</em>, <em>scanner</em>) transforma a sequência de caracteres numa sequência de <strong>tokens</strong>. Cada token tem um <strong>tipo</strong> (NOTA, NUMERO, ID…) e um <strong>lexema</strong> (o texto exato, como <code>c4</code> ou <code>120</code>). Espaços e comentários são descartados aqui.</p>
 
       <h3>Exemplo real</h3>
-      <p>A linha <code>faixa baixo: nota [c2 ~ &lt;eb2 g2&gt;] com grave .lento(2);</code> vira, no Lark:</p>
-<pre><code>FAIXA 'faixa'  ID 'baixo'  COLON ':'  NOTA_KW 'nota'  LSQB '['  NOTA 'c2'  TILDE '~'
+      <p>A linha <code>faixa baixo: [c2 ~ &lt;eb2 g2&gt;] com grave .lento(2);</code> vira, no Lark:</p>
+<pre><code>FAIXA 'faixa'  ID 'baixo'  COLON ':'  LSQB '['  NOTA 'c2'  TILDE '~'
 LESSTHAN '&lt;'  NOTA 'eb2'  NOTA 'g2'  MORETHAN '&gt;'  RSQB ']'  COM 'com'  ID 'grave'
 DOT '.'  ID 'lento'  LPAR '('  NUMERO '2'  RPAR ')'  SEMICOLON ';'</code></pre>
       <p>Os nomes <code>LSQB</code>, <code>TILDE</code>, <code>COLON</code> etc. são os nomes automáticos que o Lark dá aos símbolos literais da gramática. Palavras reservadas viram tokens com o próprio nome em maiúsculas (<code>FAIXA</code>, <code>COM</code>).</p>
@@ -432,8 +432,6 @@ DOT '.'  ID 'lento'  LPAR '('  NUMERO '2'  RPAR ')'  SEMICOLON ';'</code></pre>
 SOM.3    : /(bd|sd|hh|oh|cp)(?![A-Za-z0-9_])/       // bateria sintetizada
 ONDA.3   : /(senoide|quadrada|serra|triangulo)(?![A-Za-z0-9_])/
 
-NOTA_KW  : "nota"
-BATERIA_KW : "bateria"
 VOLUME   : "volume"
 
 NUMERO   : /-?[0-9]+(\.[0-9]+)?/
@@ -493,9 +491,9 @@ def _id(tok: Token) -&gt; str:
 
       <h3>Erros léxicos</h3>
       <p>Quando nenhum terminal casa com o caractere atual, o Lark lança <code>UnexpectedCharacters</code>, que o parser converte em <code>ErroLexico</code> com linha e coluna. Uma aspa sem fechamento tem mensagem especial:</p>
-<pre><code>exemplos/erros/lexico_caractere.ritmo:2:22: erro léxico: caractere inesperado '$'
- 2 | faixa a: bateria [bd $ sd];
-   |                      ^</code></pre>
+<pre><code>exemplos/erros/lexico_caractere.ritmo:2:14: erro léxico: caractere inesperado '$'
+ 2 | faixa a: [bd $ sd];
+   |              ^</code></pre>
     </div>
   </section>
 
@@ -536,7 +534,7 @@ atomo           ::= NOTA | SOM | "~" | "[" camadas "]" | "&lt;" sequencia "&gt;"
 propriedade     : "onda" ONDA           -&gt; prop_onda
                 | VOLUME NUMERO         -&gt; prop_volume
 
-fonte           : tipo_fonte (padrao | ID) ["com" ID]
+fonte           : (padrao | ID) ["com" ID]        // tipo (nota/bateria) inferido do conteúdo
 
 camadas         : sequencia ("," sequencia)*
 sequencia       : passo+
@@ -617,17 +615,16 @@ passo           : atomo modificador*
   <section class="cap" id="ast">
     <div class="prose">
       <div class="cap-head"><span class="num">06</span><h2>Fase 3 · A AST</h2><span class="file">parser.py (ConstrutorAST) · ast_nos.py</span></div>
-      <p>A árvore de derivação do Lark é <strong>concreta</strong>: ela espelha a gramática, com nós como <code>passo</code>, <code>tipo_fonte</code> e <code>padrao</code>, e guarda tokens soltos. A <strong>AST</strong> (árvore sintática <em>abstrata</em>) guarda só o que importa para o significado, com nós tipados e posição no código.</p>
+      <p>A árvore de derivação do Lark é <strong>concreta</strong>: ela espelha a gramática, com nós como <code>passo</code>, <code>fonte</code> e <code>padrao</code>, e guarda tokens soltos. A <strong>AST</strong> (árvore sintática <em>abstrata</em>) guarda só o que importa para o significado, com nós tipados e posição no código.</p>
 
       <h3>Concreta × abstrata, lado a lado</h3>
-      <p>Programa: <code>faixa baixo: nota [c2 ~ &lt;eb2 g2&gt;] com grave .lento(2);</code></p>
+      <p>Programa: <code>faixa baixo: [c2 ~ &lt;eb2 g2&gt;] com grave .lento(2);</code></p>
     </div>
     <div class="lab-grid" style="margin-bottom:18px">
       <div class="panel"><div class="code-label">árvore concreta (Lark) · --mostrar-arvore</div>
 <pre><code class="tree">faixa
   baixo
   fonte
-    tipo_fonte  nota
     padrao
       camadas
         sequencia
@@ -659,7 +656,7 @@ passo           : atomo modificador*
 └── .lento(2)</code></pre></div>
     </div>
     <div class="prose">
-      <p>O que mudou: os nós <code>passo</code> e <code>padrao</code> sumiram. O <code>grupo</code> <code>[ ]</code> vira a própria <code>Camadas</code>. O <code>tipo_fonte</code> e o instrumento viraram campos da <code>Fonte</code>. A nota ganhou sua altura MIDI. Os colchetes, os pontos e os ponto-e-vírgulas, que só existiam para delimitar, não aparecem mais.</p>
+      <p>O que mudou: os nós <code>passo</code> e <code>padrao</code> sumiram. O <code>grupo</code> <code>[ ]</code> vira a própria <code>Camadas</code>. O instrumento virou campo da <code>Fonte</code>, e o tipo (<code>nota</code> na impressão) não vem do código: é inferido do padrão pelo semântico e gravado em <code>Fonte.tipo</code>. A nota ganhou sua altura MIDI. Os colchetes, os pontos e os ponto-e-vírgulas, que só existiam para delimitar, não aparecem mais.</p>
 
       <h3>Os nós (dataclasses)</h3>
 <pre><code data-lang="py">@dataclass
@@ -684,10 +681,11 @@ class Rapido(No):
 
 @dataclass
 class Fonte(No):
-    tipo: str                          # "nota" | "bateria"
-    padrao: Optional[Camadas]            # padrão literal ...
+    padrao: Optional[Camadas]          # padrão literal ...
     ref: Optional[Ref]                 # ... ou referência a um padrão nomeado
-    instrumento: Optional[Ref]</code></pre>
+    instrumento: Optional[Ref]
+    pos: Pos                           # posição do conteúdo (padrão ou ID)
+    tipo: Optional[str] = None         # inferido pelo semântico: "nota" | "bateria" | None</code></pre>
       <p>Lista completa: <code>Programa</code>, <code>Tempo</code>, <code>Instrumento</code>, <code>Propriedade</code>, <code>DefPadrao</code>, <code>Faixa</code>, <code>Fonte</code>, <code>Transformacao</code>, <code>Tocar</code>, <code>Ref</code>, <code>Numero</code> e, na mini-notação, <code>Camadas</code>, <code>Sequencia</code>, <code>Nota</code>, <code>Som</code>, <code>Pausa</code>, <code>Alterna</code>, <code>Rapido</code> e <code>Lento</code>.</p>
       <div class="note"><span class="k-title">Por que guardar o texto do número?</span>
       O gerador escreve o número no Python exatamente como o usuário digitou (<code>1.5</code>), e o runtime o converte em fração exata com <code>Fraction("1.5")</code> = 3/2. Converter para <code>float</code> cedo demais introduziria erros de arredondamento (<code>0.1</code> não é representável em binário).</div>
@@ -754,7 +752,7 @@ class TabelaSimbolos:
     padroes: Dict[str, InfoPadrao]
     faixas: Dict[str, A.Faixa]
     tocar: Optional[A.Tocar] = None</code></pre>
-      <p>São <strong>três espaços de nomes separados</strong> (instrumentos, padrões e faixas), um dicionário para cada. Cada categoria aparece num contexto sintático diferente (<code>com X</code> é sempre instrumento e <code>nota X</code> é sempre padrão), então não há ambiguidade. Por isso <code>faixa groove: bateria groove;</code> é válido.</p>
+      <p>São <strong>três espaços de nomes separados</strong> (instrumentos, padrões e faixas), um dicionário para cada. Cada categoria aparece num contexto sintático diferente (<code>com X</code> é sempre instrumento e o <code>X</code> logo depois de <code>faixa nome:</code> é sempre padrão), então não há ambiguidade. Por isso <code>faixa groove: groove;</code> é válido.</p>
 
       <h3>Inferência do "tipo" de um padrão</h3>
       <p>Um padrão é um tipo composto, e seu conteúdo é de <em>notas</em> ou de <em>sons de bateria</em>. A função <code>_tipo_padrao</code> coleta todas as folhas da subárvore (<code>Nota</code> e <code>Som</code>) e compara cada uma com a primeira:</p>
@@ -770,7 +768,7 @@ class TabelaSimbolos:
             self.erros.append(_erro(f"padrão mistura ... : '{nome}'", f.pos, dica))
             break
     return tipo                          # None se só houver pausas</code></pre>
-      <p>Um padrão só de pausas tem tipo <code>None</code> ("neutro") e é compatível com os dois tipos de faixa. O tipo de um <strong>padrão nomeado</strong> fica guardado na tabela e é verificado <strong>no ponto de uso</strong>: <code>padrao m = [c4 e4]; faixa a: bateria m;</code> dá erro na linha da faixa, que é onde está a incompatibilidade.</p>
+      <p>A faixa não declara tipo: o <strong>tipo da faixa é sempre o do seu padrão</strong>. Para padrão literal, vem de <code>_tipo_padrao</code>; para <strong>padrão nomeado</strong>, vem da tabela de símbolos, preenchida na 1ª passada, então funciona mesmo que o padrão seja declarado depois da faixa. O tipo é gravado em <code>fonte.tipo</code> e usado para proibir <code>com</code> e <code>.transpor</code> em faixas com sons de bateria e para o aviso de faixa com notas sem <code>com</code>. Um padrão só de pausas tem tipo <code>None</code> ("neutro"): aceita <code>com</code> e <code>.transpor</code>, que não têm efeito sonoro nele.</p>
 
       <h3>Todas as verificações</h3>
     </div>
@@ -779,26 +777,25 @@ class TabelaSimbolos:
       <tbody>
         <tr><td>instrumento ou padrão não declarado</td><td><code>_verificar_faixa</code></td><td><code>sem_instrumento_nao_declarado</code>, <code>sem_padrao_nao_declarado</code></td></tr>
         <tr><td>duplicidade (instrumento, padrão, faixa)</td><td><code>_declarar_*</code>, <code>_verificar_faixa</code></td><td><code>sem_duplicidade</code></td></tr>
-        <tr><td><code>bateria</code> com notas / <code>nota</code> com sons de bateria</td><td><code>_verificar_faixa</code></td><td><code>sem_bateria_com_notas</code></td></tr>
         <tr><td>padrão misturando notas e bateria</td><td><code>_tipo_padrao</code></td><td><code>sem_padrao_misto</code></td></tr>
-        <tr><td><code>com</code> em faixa de <code>bateria</code></td><td><code>_verificar_faixa</code></td><td><code>sem_com_em_bateria</code></td></tr>
+        <tr><td><code>com</code> em faixa cujo padrão tem sons de bateria</td><td><code>_verificar_faixa</code></td><td><code>sem_com_em_bateria</code></td></tr>
         <tr><td>transformação desconhecida / aridade errada</td><td><code>_verificar_transformacao</code></td><td><code>sem_transformacao_desconhecida</code>, <code>sem_aridade</code></td></tr>
         <tr><td><code>*0</code>, <code>/0</code>, <code>rapido</code>/<code>lento</code> ≤ 0, <code>volume</code> ∉ [0,1]</td><td><code>_percorrer</code>, <code>_verificar_transformacao</code></td><td><code>sem_argumento_invalido</code></td></tr>
-        <tr><td><code>transpor</code> não inteiro, ou em faixa de <code>bateria</code></td><td><code>_verificar_transformacao</code></td><td><code>sem_transpor_nao_inteiro</code></td></tr>
+        <tr><td><code>transpor</code> não inteiro, ou em faixa cujo padrão tem sons de bateria</td><td><code>_verificar_transformacao</code></td><td><code>sem_transpor_nao_inteiro</code></td></tr>
         <tr><td>propriedade de instrumento repetida</td><td><code>_declarar_instrumento</code></td><td><code>sem_propriedade_repetida</code></td></tr>
         <tr><td><code>tempo</code> ≤ 0 ou repetido; ciclos ≤ 0 ou não inteiros</td><td><code>analisar</code>, <code>_verificar_tocar</code></td><td><code>sem_tempo_duplicado</code>, <code>sem_tempo_e_ciclos_invalidos</code></td></tr>
         <tr><td><code>tocar</code> ausente ou repetido, nenhuma faixa</td><td><code>analisar</code></td><td><code>sem_sem_tocar</code>, <code>sem_dois_tocar</code>, <code>sem_sem_faixa</code></td></tr>
       </tbody>
     </table></div>
     <div class="prose">
-      <p><strong>Avisos</strong> (não interrompem): <code>tempo</code> ausente, instrumento ou padrão nunca usado, faixa de nota sem <code>com</code>, instrumento sem <code>onda</code> e arquivo de saída sem <code>.wav</code>.</p>
+      <p><strong>Avisos</strong> (não interrompem): <code>tempo</code> ausente, instrumento ou padrão nunca usado, faixa com notas sem <code>com</code>, instrumento sem <code>onda</code> e arquivo de saída sem <code>.wav</code>.</p>
 
       <h3>Coletar todos os erros</h3>
       <p>O analisador não para no primeiro erro. Ele acumula tudo em <code>self.erros</code> e, no final, lança <code>ErrosSemanticos</code> com a lista ordenada por posição. É o comportamento dos compiladores de verdade: o usuário corrige vários problemas numa rodada só. Isso funciona aqui porque, depois do parse, a AST está completa, então um erro semântico não impede a análise do resto.</p>
-<pre><code>exemplos/erros/sem_argumento_invalido.ritmo:2:22: erro semântico: '*0': o fator deve ser &gt; 0
- 2 | faixa a: bateria [bd*0 sd/0] .lento(-1) .volume(1.5);
-   |                      ^
-exemplos/erros/sem_argumento_invalido.ritmo:2:27: erro semântico: '/0': o fator deve ser &gt; 0
+<pre><code>exemplos/erros/sem_argumento_invalido.ritmo:2:14: erro semântico: '*0': o fator deve ser &gt; 0
+ 2 | faixa a: [bd*0 sd/0] .lento(-1) .volume(1.5);
+   |              ^
+exemplos/erros/sem_argumento_invalido.ritmo:2:19: erro semântico: '/0': o fator deve ser &gt; 0
  ...
 compilação interrompida: 4 erro(s)</code></pre>
       <div class="note"><span class="k-title">Por que léxico e sintático param no primeiro erro?</span>

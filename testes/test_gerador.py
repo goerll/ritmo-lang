@@ -25,19 +25,19 @@ def test_codigo_espelha_a_estrutura():
 
 
 def test_transformacoes_aplicadas_em_ordem():
-    codigo = traduzir("faixa a: nota [c4] .transpor(12) .volume(0.6);\ntocar 1 ciclos;")
+    codigo = traduzir("faixa a: [c4] .transpor(12) .volume(0.6);\ntocar 1 ciclos;")
     assert 'f_a = volume(0.6, transpor(12, nota("c4")))' in codigo
 
 
 def test_modificadores_aninhados():
-    codigo = traduzir("faixa a: bateria [bd [sd hh]*2/3];\ntocar 1 ciclos;")
+    codigo = traduzir("faixa a: [bd [sd hh]*2/3];\ntocar 1 ciclos;")
     assert 'seq(som("bd"), lento(3, rapido(2, seq(som("sd"), som("hh")))))' in codigo
 
 
 def test_script_autocontido_executa(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     src = "tempo 240;\ninstrumento x { onda serra; volume 0.5; }\n" \
-          "faixa a: nota [c4 e4] com x;\nfaixa b: bateria [bd sd];\ntocar 2 ciclos salvar \"t.wav\";"
+          "faixa a: [c4 e4] com x;\nfaixa b: [bd sd];\ntocar 2 ciclos salvar \"t.wav\";"
     prog = analisar(src)
     r = analisar_semantica(prog)
     codigo = gerar(prog, r.tabela, reproduzir=False)

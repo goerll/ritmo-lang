@@ -1,5 +1,5 @@
 tempo 120;
 instrumento lead { onda senoide; }
 instrumento lead { onda serra; }
-faixa a: nota [c4] com lead;
+faixa a: [c4] com lead;
 tocar 2 ciclos;

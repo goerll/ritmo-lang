@@ -1,3 +1,3 @@
 tempo 120;
-faixa a: nota [c4e4 g4];
+faixa a: [c4e4 g4];
 tocar 2 ciclos;

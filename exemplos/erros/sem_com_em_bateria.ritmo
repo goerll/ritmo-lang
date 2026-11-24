@@ -1,4 +1,4 @@
 tempo 120;
 instrumento lead { onda senoide; }
-faixa a: bateria [bd sd] com lead;
+faixa a: [bd sd] com lead;
 tocar 2 ciclos;

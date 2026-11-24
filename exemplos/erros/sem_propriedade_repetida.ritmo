@@ -1,4 +1,4 @@
 tempo 120;
 instrumento lead { onda senoide; volume 0.5; volume 0.7; }
-faixa a: nota [c4] com lead;
+faixa a: [c4] com lead;
 tocar 2 ciclos;

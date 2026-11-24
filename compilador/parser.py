@@ -52,7 +52,7 @@ def _num(tok: Token) -> A.Numero:
 
 
 RESERVADAS = {"tempo", "instrumento", "onda", "volume", "padrao", "faixa",
-              "nota", "bateria", "com", "tocar", "ciclos", "salvar"}
+              "com", "tocar", "ciclos", "salvar"}
 _RE_NOTA = re.compile(r"[a-g](#|b)?[0-9]")
 _SONS = {"bd", "sd", "hh", "oh", "cp"}
 
@@ -104,18 +104,17 @@ class ConstrutorAST(Transformer):
         nome, fonte, *transf = filhos
         return A.Faixa(_id(nome), fonte, transf, _pos_tok(nome))
 
-    def tipo_fonte(self, meta, filhos):
-        return filhos[0]
-
     def fonte(self, meta, filhos):
-        tipo, conteudo, instr = filhos
+        conteudo, instr = filhos
         padrao = ref = None
         if isinstance(conteudo, Token):
             ref = A.Ref(_id(conteudo), _pos_tok(conteudo))
+            pos = ref.pos
         else:
             padrao = conteudo
+            pos = conteudo.pos
         instrumento = A.Ref(_id(instr), _pos_tok(instr)) if instr is not None else None
-        return A.Fonte(str(tipo), padrao, ref, instrumento, _pos_tok(tipo))
+        return A.Fonte(padrao, ref, instrumento, pos)
 
     def nome_transf(self, meta, filhos):
         return filhos[0]
@@ -182,8 +181,6 @@ _NOMES_TERMINAIS = {
     "NUMERO": "número",
     "STRING": "string",
     "ID": "identificador",
-    "NOTA_KW": "'nota'",
-    "BATERIA_KW": "'bateria'",
     "VOLUME": "'volume'",
     "$END": "fim do arquivo",
 }

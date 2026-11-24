@@ -224,15 +224,17 @@ class Transformacao(No):
 
 @dataclass
 class Fonte(No):
-    tipo: str                    # "nota" | "bateria"
-    padrao: Optional[Camadas]      # padrão literal ...
+    padrao: Optional[Camadas]    # padrão literal ...
     ref: Optional[Ref]           # ... ou referência a um padrão nomeado
     instrumento: Optional[Ref]
     pos: Pos = field(default_factory=Pos)
+    # tipo inferido do conteúdo pelo semântico: "nota", "bateria" ou None (só pausas)
+    tipo: Optional[str] = None
 
     def rotulo(self):
         com = f" com {self.instrumento.nome}" if self.instrumento else ""
-        return f"Fonte {self.tipo}{com}"
+        tipo = self.tipo if self.tipo is not None else "pausas"
+        return f"Fonte {tipo}{com}"
 
     def filhos(self):
         return [self.padrao if self.padrao is not None else self.ref]

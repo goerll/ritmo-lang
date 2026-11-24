@@ -1,4 +1,4 @@
 tempo 120;
-faixa a: bateria [bd sd];
+faixa a: [bd sd];
 tocar 2 ciclos;
 tocar 4 ciclos;

@@ -97,7 +97,7 @@ class Analisador:
 
         if not self.tab.faixas:
             self.erros.append(ErroSemantico("nenhuma faixa declarada",
-                                            dica="declare ao menos uma: faixa x: bateria [bd sd];"))
+                                            dica="declare ao menos uma: faixa x: [bd sd];"))
 
         # tocar
         if not tocares:
@@ -207,26 +207,21 @@ class Analisador:
             info = self.tab.padroes.get(fonte.ref.nome)
             if info is None:
                 self.erros.append(_erro(f"padrão '{fonte.ref.nome}' não declarado", fonte.ref.pos))
-                tipo, pos_conteudo = None, fonte.ref.pos
+                tipo = None
             else:
                 info.usado = True
-                tipo, pos_conteudo = info.tipo, fonte.ref.pos
+                tipo = info.tipo
         else:
-            tipo, pos_conteudo = self._tipo_padrao(fonte.padrao), fonte.padrao.pos
+            tipo = self._tipo_padrao(fonte.padrao)
 
-        if tipo is not None and tipo != fonte.tipo:
-            if fonte.tipo == "bateria":
-                msg = f"faixa '{f.nome}' é de 'bateria', mas o padrão contém notas"
-                dica = "use 'nota' para melodias"
-            else:
-                msg = f"faixa '{f.nome}' é de 'nota', mas o padrão contém sons de bateria"
-                dica = "use 'bateria' para sons de bateria"
-            self.erros.append(_erro(msg, pos_conteudo, dica))
+        # o tipo da faixa é sempre o inferido do conteúdo (None = só pausas)
+        fonte.tipo = tipo
 
         # instrumento
         if fonte.instrumento is not None:
-            if fonte.tipo == "bateria":
-                self.erros.append(_erro("'com instrumento' não pode ser usado em faixa de 'bateria'",
+            if tipo == "bateria":
+                self.erros.append(_erro("'com instrumento' não pode ser usado: o padrão da faixa "
+                                        f"'{f.nome}' contém sons de bateria",
                                         fonte.instrumento.pos,
                                         "a bateria é sintetizada; instrumentos só valem para notas"))
             info_i = self.tab.instrumentos.get(fonte.instrumento.nome)
@@ -235,15 +230,16 @@ class Analisador:
                                         fonte.instrumento.pos))
             else:
                 info_i.usado = True
-        elif fonte.tipo == "nota":
+        elif tipo == "nota":
             self.avisos.append(_aviso(
                 f"faixa '{f.nome}' sem 'com'; usando instrumento padrão "
                 f"({ONDA_PADRAO}, volume {VOLUME_PADRAO})", f.pos))
 
         for t in f.transformacoes:
-            self._verificar_transformacao(t, fonte.tipo)
+            self._verificar_transformacao(t, f.nome, tipo)
 
-    def _verificar_transformacao(self, t: A.Transformacao, tipo_faixa: str):
+    def _verificar_transformacao(self, t: A.Transformacao, nome_faixa: str,
+                                 tipo_faixa: Optional[str]):
         if t.nome not in TRANSFORMACOES:
             self.erros.append(_erro(f"transformação desconhecida '.{t.nome}'", t.pos,
                                     "disponíveis: " + ", ".join(f".{n}" for n in TRANSFORMACOES)))
@@ -264,7 +260,8 @@ class Analisador:
                 self.erros.append(_erro(f"'.transpor' exige número inteiro de semitons "
                                         f"(recebido {arg.texto})", arg.pos))
             elif tipo_faixa == "bateria":
-                self.erros.append(_erro("'.transpor' não se aplica a faixa de 'bateria'", t.pos))
+                self.erros.append(_erro("'.transpor' não se aplica: o padrão da faixa "
+                                        f"'{nome_faixa}' contém sons de bateria", t.pos))
 
     def _verificar_tocar(self, t: A.Tocar):
         self.tab.tocar = t
